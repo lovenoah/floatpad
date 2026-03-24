@@ -14,6 +14,33 @@ export function loadState(label: string, defaults: ItemState): ItemState {
   }
 }
 
+export function loadAllStates(items: ItemDef[]): Record<string, ItemState> {
+  const stored: Record<string, ItemState> = {};
+  try {
+    const all = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}');
+    for (const item of items) {
+      stored[item.label] = all[item.label] ?? {
+        x: item.x,
+        y: item.y,
+        scale: 1,
+        rot: item.rot,
+        z: item.z,
+      };
+    }
+  } catch {
+    for (const item of items) {
+      stored[item.label] = { x: item.x, y: item.y, scale: 1, rot: item.rot, z: item.z };
+    }
+  }
+  return stored;
+}
+
+export function saveAllStates(states: Record<string, ItemState>) {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(states));
+  } catch { /* noop */ }
+}
+
 export function saveState(label: string, state: ItemState) {
   try {
     const all = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}');

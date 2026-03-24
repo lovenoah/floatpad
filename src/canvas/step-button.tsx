@@ -1,8 +1,12 @@
-const PANEL_FONT = 'ui-monospace, SFMono-Regular, Menlo, monospace';
+import { motion } from 'motion/react';
+
+const PANEL_FONT = "'Geist', ui-monospace, SFMono-Regular, Menlo, monospace";
 
 export function StepButton({ children, onClick }: { children: React.ReactNode; onClick: () => void }) {
   return (
-    <button
+    <motion.button
+      whileHover={{ background: '#f3f4f6', borderColor: '#d1d5db' }}
+      whileTap={{ scale: 0.9 }}
       style={{
         display: 'flex',
         alignItems: 'center',
@@ -17,12 +21,11 @@ export function StepButton({ children, onClick }: { children: React.ReactNode; o
         color: '#6b7280',
         cursor: 'pointer',
         fontFamily: PANEL_FONT,
-        transition: 'all 0.1s',
       }}
       onPointerDown={e => e.stopPropagation()}
       onClick={e => { e.stopPropagation(); onClick(); }}
     >
       {children}
-    </button>
+    </motion.button>
   );
 }

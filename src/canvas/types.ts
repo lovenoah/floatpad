@@ -23,3 +23,17 @@ export type ItemState = {
   rot: number;
   z: number;
 };
+
+export type CanvasState = {
+  items: ItemDef[];
+  states: Record<string, ItemState>;
+};
+
+export type FloatpadSettings = {
+  gridSize: number;
+  snapThreshold: number;
+  nudgeSmall: number;
+  nudgeLarge: number;
+  duplicateOffset: number;
+  bgColor: string;
+};
