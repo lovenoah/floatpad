@@ -29,7 +29,7 @@ export type CanvasState = {
   states: Record<string, ItemState>;
 };
 
-export type FloatpadSettings = {
+export type NudgeSettings = {
   gridSize: number;
   snapThreshold: number;
   nudgeSmall: number;

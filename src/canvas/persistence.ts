@@ -1,7 +1,7 @@
 import type { ItemDef, ItemState } from './types';
 
-const LAYOUT_ENDPOINT = '/__floatpad/layout';
-const SAVE_ENDPOINT = '/__floatpad/save';
+const LAYOUT_ENDPOINT = '/__justanudge/layout';
+const SAVE_ENDPOINT = '/__justanudge/save';
 
 export type LayoutData = {
   items: ItemDef[];

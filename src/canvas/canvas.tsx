@@ -13,13 +13,13 @@ import { useCamera } from './use-camera';
 import { loadLayout, saveLayout, defaultStatesFromItems } from './persistence';
 import { createHistory } from './history';
 import { useToast } from './toast';
-import type { ItemDef, ItemState, FloatpadSettings } from './types';
+import type { ItemDef, ItemState, NudgeSettings } from './types';
 
 export type Renderer = (props: Record<string, unknown>) => React.ReactNode;
 
 let nextId = 1;
 
-export const DEFAULT_SETTINGS: FloatpadSettings = {
+export const DEFAULT_SETTINGS: NudgeSettings = {
   gridSize: 20,
   snapThreshold: 5,
   nudgeSmall: 1,
@@ -28,16 +28,16 @@ export const DEFAULT_SETTINGS: FloatpadSettings = {
   bgColor: '#f8fafc',
 };
 
-export type FloatpadCanvasProps = {
+export type NudgeCanvasProps = {
   initialItems: ItemDef[];
   renderers: Record<string, Renderer>;
-  settings?: Partial<FloatpadSettings>;
+  settings?: Partial<NudgeSettings>;
   onInfoClick?: () => void;
   onSettingsClick?: () => void;
   onSelectionChange?: (hasSelection: boolean) => void;
 };
 
-export function FloatpadCanvas({ initialItems, renderers, settings: settingsOverride, onInfoClick, onSettingsClick, onSelectionChange }: FloatpadCanvasProps) {
+export function NudgeCanvas({ initialItems, renderers, settings: settingsOverride, onInfoClick, onSettingsClick, onSelectionChange }: NudgeCanvasProps) {
   const settings = { ...DEFAULT_SETTINGS, ...settingsOverride };
   const { gridSize, snapThreshold, nudgeSmall, nudgeLarge, duplicateOffset } = settings;
   const [items, setItems] = useState<ItemDef[]>(initialItems);

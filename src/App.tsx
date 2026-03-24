@@ -1,9 +1,9 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { FloatpadCanvas, DEFAULT_SETTINGS } from './canvas/canvas';
+import { NudgeCanvas, DEFAULT_SETTINGS } from './canvas/canvas';
 import { InfoButton, SettingsButton } from './canvas/info-button';
 import { DEMO_ITEMS, DEMO_RENDERERS } from './demo/demo-items';
-import type { FloatpadSettings } from './canvas/types';
+import type { NudgeSettings } from './canvas/types';
 
 const FONT = "'Geist', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif";
 const MONO = "'Geist', ui-monospace, monospace";
@@ -267,7 +267,7 @@ function SectionCard({ children }: { children: React.ReactNode }) {
 
 function InfoPanel({ onClose }: { onClose: () => void }) {
   return (
-    <PanelShell title="Floatpad" subtitle="Keyboard shortcuts and features" onClose={onClose}>
+    <PanelShell title="Just a Nudge" subtitle="Keyboard shortcuts and features" onClose={onClose}>
       {HELP_SECTIONS.map((section, si) => (
         <div key={si} style={{ marginTop: si === 0 ? 8 : 16 }}>
           <SectionLabel>{section.title}</SectionLabel>
@@ -443,8 +443,8 @@ function Separator() {
 }
 
 function SettingsPanel({ settings, onChange, onClose }: {
-  settings: FloatpadSettings;
-  onChange: (patch: Partial<FloatpadSettings>) => void;
+  settings: NudgeSettings;
+  onChange: (patch: Partial<NudgeSettings>) => void;
   onClose: () => void;
 }) {
   return (
@@ -513,11 +513,11 @@ export default function App() {
   const [showInfo, setShowInfo] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [hasSelection, setHasSelection] = useState(false);
-  const [settings, setSettings] = useState<FloatpadSettings>({ ...DEFAULT_SETTINGS });
+  const [settings, setSettings] = useState<NudgeSettings>({ ...DEFAULT_SETTINGS });
 
   const toggleInfo = useCallback(() => { setShowInfo(v => !v); setShowSettings(false); }, []);
   const toggleSettings = useCallback(() => { setShowSettings(v => !v); setShowInfo(false); }, []);
-  const patchSettings = useCallback((patch: Partial<FloatpadSettings>) => {
+  const patchSettings = useCallback((patch: Partial<NudgeSettings>) => {
     setSettings(prev => ({ ...prev, ...patch }));
   }, []);
 
@@ -530,7 +530,7 @@ export default function App() {
       background: settings.bgColor,
       transition: 'background 0.3s',
     }}>
-      <FloatpadCanvas
+      <NudgeCanvas
         initialItems={DEMO_ITEMS}
         renderers={DEMO_RENDERERS}
         settings={settings}

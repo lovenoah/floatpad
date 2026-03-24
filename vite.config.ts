@@ -3,12 +3,12 @@ import react from '@vitejs/plugin-react';
 import fs from 'node:fs';
 import path from 'node:path';
 
-const LAYOUT_FILE = '.floatpad-layout.json';
+const LAYOUT_FILE = '.justanudge-layout.json';
 
-function floatpadPlugin() {
+function justanudgePlugin() {
   let root = '';
   return {
-    name: 'floatpad-layout',
+    name: 'justanudge-layout',
     configResolved(config: { root: string }) {
       root = config.root;
     },
@@ -16,7 +16,7 @@ function floatpadPlugin() {
       const filePath = () => path.join(root, LAYOUT_FILE);
 
       // GET - serve the layout file
-      server.middlewares.use('/__floatpad/layout', (_req: any, res: any, next: any) => {
+      server.middlewares.use('/__justanudge/layout', (_req: any, res: any, next: any) => {
         if (_req.method !== 'GET') return next();
         const fp = filePath();
         if (!fs.existsSync(fp)) {
@@ -29,7 +29,7 @@ function floatpadPlugin() {
       });
 
       // POST - save the layout file
-      server.middlewares.use('/__floatpad/save', (req: any, res: any, next: any) => {
+      server.middlewares.use('/__justanudge/save', (req: any, res: any, next: any) => {
         if (req.method !== 'POST') return next();
         let body = '';
         req.on('data', (chunk: string) => { body += chunk; });
@@ -51,5 +51,5 @@ function floatpadPlugin() {
 }
 
 export default defineConfig({
-  plugins: [react(), floatpadPlugin()],
+  plugins: [react(), justanudgePlugin()],
 });
