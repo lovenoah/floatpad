@@ -7,9 +7,10 @@ import { Guides, computeGuides, type Guide } from './guides';
 import { Marquee, type MarqueeRect } from './marquee';
 import { BoundingBox } from './bounding-box';
 import { Measurements } from './measurements';
+import { SelectionGaps } from './selection-gaps';
 import { ZoomControls } from './zoom-controls';
 import { useCamera } from './use-camera';
-import { loadItems, saveItems, loadAllStates, saveAllStates, removeState, markDeleted } from './persistence';
+import { loadLayout, saveLayout, defaultStatesFromItems } from './persistence';
 import { createHistory } from './history';
 import { useToast } from './toast';
 import type { ItemDef, ItemState, FloatpadSettings } from './types';
@@ -39,8 +40,9 @@ export type FloatpadCanvasProps = {
 export function FloatpadCanvas({ initialItems, renderers, settings: settingsOverride, onInfoClick, onSettingsClick, onSelectionChange }: FloatpadCanvasProps) {
   const settings = { ...DEFAULT_SETTINGS, ...settingsOverride };
   const { gridSize, snapThreshold, nudgeSmall, nudgeLarge, duplicateOffset } = settings;
-  const [items, setItems] = useState<ItemDef[]>(() => loadItems(initialItems));
-  const [states, setStates] = useState<Record<string, ItemState>>(() => loadAllStates(loadItems(initialItems)));
+  const [items, setItems] = useState<ItemDef[]>(initialItems);
+  const [states, setStates] = useState<Record<string, ItemState>>(() => defaultStatesFromItems(initialItems));
+  const [loaded, setLoaded] = useState(false);
   const [selection, setSelection] = useState<Set<string>>(new Set());
   const [gridEnabled, setGridEnabled] = useState(false);
   const [activeGuides, setActiveGuides] = useState<Guide[]>([]);
@@ -59,9 +61,19 @@ export function FloatpadCanvas({ initialItems, renderers, settings: settingsOver
   // Camera
   const { camera, setCamera, screenToCanvas, zoomTo, resetView, fitToView } = useCamera(viewportRef);
 
-  // Push initial state into history
+
+  // Load layout from file on mount
   useEffect(() => {
-    historyRef.current.push(items, states);
+    loadLayout().then(data => {
+      if (data) {
+        setItems(data.items);
+        setStates(data.states);
+        historyRef.current.push(data.items, data.states);
+      } else {
+        historyRef.current.push(initialItems, defaultStatesFromItems(initialItems));
+      }
+      setLoaded(true);
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -70,9 +82,11 @@ export function FloatpadCanvas({ initialItems, renderers, settings: settingsOver
     onSelectionChange?.(selection.size > 0);
   }, [selection.size, onSelectionChange]);
 
-  // Persist
-  useEffect(() => { saveItems(items); }, [items]);
-  useEffect(() => { saveAllStates(states); }, [states]);
+  // Auto-save to file (debounced in persistence.ts)
+  useEffect(() => {
+    if (!loaded) return;
+    saveLayout({ items, states });
+  }, [items, states, loaded]);
 
   const pushHistory = useCallback((nextItems: ItemDef[], nextStates: Record<string, ItemState>) => {
     historyRef.current.push(nextItems, nextStates);
@@ -187,6 +201,24 @@ export function FloatpadCanvas({ initialItems, renderers, settings: settingsOver
     });
   }, [pushHistory]);
 
+  // ── Gap adjustment (selection gaps) ──────────────────────────────────
+  const handleGapPositionUpdate = useCallback((label: string, x: number, y: number) => {
+    setStates(prev => ({
+      ...prev,
+      [label]: { ...prev[label], x, y },
+    }));
+  }, []);
+
+  const handleGapCommit = useCallback(() => {
+    setStates(prev => {
+      setItems(currentItems => {
+        pushHistory(currentItems, prev);
+        return currentItems;
+      });
+      return prev;
+    });
+  }, [pushHistory]);
+
   // ── Selection ──────────────────────────────────────────────────────
   const handleSelect = useCallback((label: string | null, shiftKey: boolean) => {
     if (label === null) {
@@ -237,8 +269,6 @@ export function FloatpadCanvas({ initialItems, renderers, settings: settingsOver
     const nextStates = { ...states };
     for (const label of labels) {
       delete nextStates[label];
-      removeState(label);
-      markDeleted(label);
     }
     setItems(nextItems);
     setStates(nextStates);
@@ -489,6 +519,43 @@ export function FloatpadCanvas({ initialItems, renderers, settings: settingsOver
   const singleSelectedState = singleSelected ? states[singleSelected] : null;
   const [copied, setCopied] = useState(false);
 
+  const handleGroupScaleUpdate = useCallback((updates: Record<string, { x: number; y: number; scale: number }>) => {
+    setStates(prev => {
+      const next = { ...prev };
+      for (const [label, u] of Object.entries(updates)) {
+        const s = next[label];
+        if (s) next[label] = { ...s, x: u.x, y: u.y, scale: Math.round(u.scale * 100) / 100 };
+      }
+      return next;
+    });
+  }, []);
+
+  const handleGroupScaleCommit = useCallback(() => {
+    setStates(prev => {
+      setItems(currentItems => {
+        pushHistory(currentItems, prev);
+        return currentItems;
+      });
+      return prev;
+    });
+  }, [pushHistory]);
+
+  const handleAlignItems = useCallback((positions: Record<string, { x?: number; y?: number }>) => {
+    const nextStates = { ...states };
+    for (const [label, pos] of Object.entries(positions)) {
+      const s = nextStates[label];
+      if (s) {
+        nextStates[label] = {
+          ...s,
+          ...(pos.x !== undefined ? { x: Math.round(pos.x) } : {}),
+          ...(pos.y !== undefined ? { y: Math.round(pos.y) } : {}),
+        };
+      }
+    }
+    setStates(nextStates);
+    pushHistory(items, nextStates);
+  }, [items, states, pushHistory]);
+
   const handleMultiCommitChange = useCallback((patch: Partial<ItemState>) => {
     const nextStates = { ...states };
     for (const label of selection) {
@@ -647,7 +714,19 @@ export function FloatpadCanvas({ initialItems, renderers, settings: settingsOver
         })}
 
         {/* Multi-select bounding box */}
-        <BoundingBox items={items} states={states} selection={selection} zoom={camera.zoom} />
+        <BoundingBox items={items} states={states} selection={selection} zoom={camera.zoom} onAlign={handleAlignItems} onGroupScaleUpdate={handleGroupScaleUpdate} onGroupScaleCommit={handleGroupScaleCommit} />
+
+        {/* Selection gaps (interactive distance between selected items) */}
+        {selection.size >= 2 && (
+          <SelectionGaps
+            items={items}
+            states={states}
+            selection={selection}
+            zoom={camera.zoom}
+            onPositionUpdate={handleGapPositionUpdate}
+            onCommit={handleGapCommit}
+          />
+        )}
 
         {/* Distance measurements */}
         {showMeasurements && measureHoveredItem && measureHoveredState && measureSelectedStates.length > 0 && (
@@ -737,24 +816,6 @@ export function FloatpadCanvas({ initialItems, renderers, settings: settingsOver
       </AnimatePresence>
 
       {/* Help bar */}
-      <div style={{
-        position: 'absolute',
-        bottom: 20,
-        left: '50%',
-        transform: 'translateX(-50%)',
-        fontSize: 11,
-        color: '#94a3b8',
-        fontFamily: "'Geist', ui-monospace, monospace",
-        pointerEvents: 'none',
-        whiteSpace: 'nowrap',
-        letterSpacing: -0.2,
-      }}>
-        {spaceHeld
-          ? 'drag to pan'
-          : altHeld
-            ? 'hover an item to measure distances'
-            : 'scroll to pan \u00b7 \u2318scroll to zoom \u00b7 space+drag pan \u00b7 drag to move \u00b7 \u21e7click multi-select \u00b7 \u2325hover measure \u00b7 \u23180 fit \u00b7 G grid'}
-      </div>
 
       {toastNode}
     </div>

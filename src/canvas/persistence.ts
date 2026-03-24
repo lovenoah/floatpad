@@ -1,99 +1,88 @@
 import type { ItemDef, ItemState } from './types';
 
-const STORAGE_KEY = 'floatpad-positions-v1';
-const ITEMS_KEY = 'floatpad-items-v1';
-const DELETED_KEY = 'floatpad-deleted-v1';
+const LAYOUT_ENDPOINT = '/__floatpad/layout';
+const SAVE_ENDPOINT = '/__floatpad/save';
 
-export function loadState(label: string, defaults: ItemState): ItemState {
-  if (typeof window === 'undefined') return defaults;
+export type LayoutData = {
+  items: ItemDef[];
+  states: Record<string, ItemState>;
+};
+
+/**
+ * Load layout from the committed JSON file.
+ * Returns null if no saved layout exists yet.
+ */
+export async function loadLayout(): Promise<LayoutData | null> {
   try {
-    const all = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}');
-    return all[label] ?? defaults;
+    const res = await fetch(LAYOUT_ENDPOINT);
+    if (!res.ok) return null;
+    const data = await res.json();
+    if (data.items && data.states) return data as LayoutData;
+    return null;
   } catch {
-    return defaults;
+    return null;
   }
 }
 
-export function loadAllStates(items: ItemDef[]): Record<string, ItemState> {
-  const stored: Record<string, ItemState> = {};
+/**
+ * Save layout to the JSON file via the Vite dev server.
+ * Returns true on success.
+ */
+let saveTimer: ReturnType<typeof setTimeout> | null = null;
+let pendingData: LayoutData | null = null;
+
+export function saveLayout(data: LayoutData) {
+  pendingData = data;
+  if (saveTimer) clearTimeout(saveTimer);
+  saveTimer = setTimeout(flushSave, 800);
+}
+
+async function flushSave() {
+  if (!pendingData) return;
+  const data = pendingData;
+  pendingData = null;
   try {
-    const all = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}');
-    for (const item of items) {
-      stored[item.label] = all[item.label] ?? {
-        x: item.x,
-        y: item.y,
-        scale: 1,
-        rot: item.rot,
-        z: item.z,
-      };
-    }
+    await fetch(SAVE_ENDPOINT, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data, null, 2),
+    });
   } catch {
-    for (const item of items) {
-      stored[item.label] = { x: item.x, y: item.y, scale: 1, rot: item.rot, z: item.z };
-    }
+    // Dev server not available (production build) — silent no-op
   }
-  return stored;
 }
 
-export function saveAllStates(states: Record<string, ItemState>) {
+/**
+ * Force an immediate save (e.g. before navigating away).
+ */
+export async function saveLayoutNow(data: LayoutData): Promise<boolean> {
+  if (saveTimer) clearTimeout(saveTimer);
+  pendingData = null;
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(states));
-  } catch { /* noop */ }
+    const res = await fetch(SAVE_ENDPOINT, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data, null, 2),
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
 }
 
-export function saveState(label: string, state: ItemState) {
-  try {
-    const all = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}');
-    all[label] = state;
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(all));
-  } catch { /* noop */ }
-}
-
-export function removeState(label: string) {
-  try {
-    const all = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}');
-    delete all[label];
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(all));
-  } catch { /* noop */ }
-}
-
-export function loadDeletedLabels(): Set<string> {
-  try {
-    const raw = localStorage.getItem(DELETED_KEY);
-    return raw ? new Set(JSON.parse(raw) as string[]) : new Set();
-  } catch { return new Set(); }
-}
-
-export function markDeleted(label: string) {
-  try {
-    const deleted = loadDeletedLabels();
-    deleted.add(label);
-    localStorage.setItem(DELETED_KEY, JSON.stringify([...deleted]));
-  } catch { /* noop */ }
-}
-
-export function loadItems(initialItems: ItemDef[]): ItemDef[] {
-  if (typeof window === 'undefined') return initialItems;
-  try {
-    const stored = localStorage.getItem(ITEMS_KEY);
-    if (stored) {
-      const items: ItemDef[] = JSON.parse(stored);
-      const labels = new Set(items.map(i => i.label));
-      const deleted = loadDeletedLabels();
-      const missing = initialItems.filter(i => !labels.has(i.label) && !deleted.has(i.label));
-      if (missing.length > 0) {
-        const merged = [...items, ...missing];
-        localStorage.setItem(ITEMS_KEY, JSON.stringify(merged));
-        return merged;
-      }
-      return items;
-    }
-  } catch { /* noop */ }
-  return initialItems;
-}
-
-export function saveItems(items: ItemDef[]) {
-  try {
-    localStorage.setItem(ITEMS_KEY, JSON.stringify(items));
-  } catch { /* noop */ }
+/**
+ * Build default states from initialItems when no layout file exists.
+ */
+export function defaultStatesFromItems(items: ItemDef[]): Record<string, ItemState> {
+  const states: Record<string, ItemState> = {};
+  for (const item of items) {
+    states[item.label] = {
+      x: item.x,
+      y: item.y,
+      scale: 1,
+      rot: item.rot,
+      z: item.z,
+    };
+  }
+  return states;
 }

@@ -123,6 +123,22 @@ export function ZoomControls({
       <ZBtn onClick={onReset} title="Reset to 100% (Cmd+1)">
         <span style={{ fontSize: 9, fontWeight: 700, color: '#6b7280', lineHeight: 1 }}>1:1</span>
       </ZBtn>
+
+      <Dot />
+      <div style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: 1,
+        padding: '0 4px',
+        fontSize: 10,
+        fontWeight: 500,
+        fontFamily: FONT,
+        whiteSpace: 'nowrap',
+      }}>
+        <span style={{ color: '#6b7280' }}>{Math.round(-camera.panX / camera.zoom)}</span>
+        <span style={{ margin: '0 2px', color: '#d1d5db' }}>,</span>
+        <span style={{ color: '#6b7280' }}>{Math.round(-camera.panY / camera.zoom)}</span>
+      </div>
     </motion.div>
   );
 }

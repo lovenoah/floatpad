@@ -836,6 +836,8 @@ function SelectionRow({
   );
 }
 
+// ── Alignment Tools ─────────────────────────────────────────────────
+
 function Group({ children, gap = 4 }: { children: React.ReactNode; gap?: number }) {
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap }}>

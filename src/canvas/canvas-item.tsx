@@ -1,13 +1,23 @@
-import { useState, useCallback, useRef } from 'react';
+import { useState, useCallback, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import type { ItemState } from './types';
 
-// Corner positions for resize handles
-const CORNERS = [
-  { key: 'tl', style: (s: (n: number) => number) => ({ top: s(-5), left: s(-5) }), cursor: 'nwse-resize' },
-  { key: 'tr', style: (s: (n: number) => number) => ({ top: s(-5), right: s(-5) }), cursor: 'nesw-resize' },
-  { key: 'bl', style: (s: (n: number) => number) => ({ bottom: s(-5), left: s(-5) }), cursor: 'nesw-resize' },
-  { key: 'br', style: (s: (n: number) => number) => ({ bottom: s(-5), right: s(-5) }), cursor: 'nwse-resize' },
+// Figma-style handles: filled squares at corners, circles at edge midpoints
+const SQ = 8; // corner square size
+const CI = 7; // midpoint circle size
+
+const CORNER_HANDLES = [
+  { key: 'tl', style: (s: (n: number) => number) => ({ top: s(-SQ / 2), left: s(-SQ / 2) }), cursor: 'nwse-resize' },
+  { key: 'tr', style: (s: (n: number) => number) => ({ top: s(-SQ / 2), right: s(-SQ / 2) }), cursor: 'nesw-resize' },
+  { key: 'bl', style: (s: (n: number) => number) => ({ bottom: s(-SQ / 2), left: s(-SQ / 2) }), cursor: 'nesw-resize' },
+  { key: 'br', style: (s: (n: number) => number) => ({ bottom: s(-SQ / 2), right: s(-SQ / 2) }), cursor: 'nwse-resize' },
+];
+
+const EDGE_HANDLES = [
+  { key: 'top', style: (s: (n: number) => number) => ({ top: s(-CI / 2), left: '50%', marginLeft: s(-CI / 2) }), cursor: 'ns-resize' },
+  { key: 'bottom', style: (s: (n: number) => number) => ({ bottom: s(-CI / 2), left: '50%', marginLeft: s(-CI / 2) }), cursor: 'ns-resize' },
+  { key: 'left', style: (s: (n: number) => number) => ({ left: s(-CI / 2), top: '50%', marginTop: s(-CI / 2) }), cursor: 'ew-resize' },
+  { key: 'right', style: (s: (n: number) => number) => ({ right: s(-CI / 2), top: '50%', marginTop: s(-CI / 2) }), cursor: 'ew-resize' },
 ];
 
 export function CanvasItem({
@@ -42,15 +52,36 @@ export function CanvasItem({
   children: React.ReactNode;
 }) {
   const [hovered, setHovered] = useState(false);
+  const [interacting, setInteracting] = useState(false);
   const dragging = useRef(false);
   const resizing = useRef(false);
   const dragStart = useRef({ mx: 0, my: 0 });
   const resizeStart = useRef({ scale: 1, dist: 0, cx: 0, cy: 0 });
   const visualRef = useRef<HTMLDivElement>(null);
+  const contentRef = useRef<HTMLDivElement>(null);
+  const [contentSize, setContentSize] = useState<{ w: number; h: number } | null>(null);
 
   const { x, y, scale, rot, z = 0 } = state;
   const w = Math.round(initW * scale);
   const h = Math.round(initH * scale);
+
+  // Measure the actual content size (unscaled) to tighten the selection frame
+  useEffect(() => {
+    const el = contentRef.current;
+    if (!el) return;
+    const observer = new ResizeObserver(([entry]) => {
+      const { width, height } = entry.contentRect;
+      if (width > 0 && height > 0) {
+        setContentSize({ w: Math.round(width), h: Math.round(height) });
+      }
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+
+  // Selection frame dimensions: use measured content size if available
+  const frameW = contentSize ? Math.round(contentSize.w * scale) : w;
+  const frameH = contentSize ? Math.round(contentSize.h * scale) : h;
 
   // Screen-constant size helper: keeps UI chrome at fixed screen pixels
   const s = useCallback((px: number) => px / zoom, [zoom]);
@@ -62,6 +93,7 @@ export function CanvasItem({
     e.stopPropagation();
     (e.target as HTMLElement).setPointerCapture(e.pointerId);
     dragging.current = true;
+    setInteracting(true);
     dragStart.current = { mx: e.clientX, my: e.clientY };
     onSelect(label, e.shiftKey);
     onDragStart();
@@ -78,6 +110,7 @@ export function CanvasItem({
   const onPointerUp = useCallback((e: React.PointerEvent) => {
     if (!dragging.current) return;
     dragging.current = false;
+    setInteracting(false);
     (e.target as HTMLElement).releasePointerCapture(e.pointerId);
     onDragEnd();
   }, [onDragEnd]);
@@ -88,6 +121,7 @@ export function CanvasItem({
     e.stopPropagation();
     (e.target as HTMLElement).setPointerCapture(e.pointerId);
     resizing.current = true;
+    setInteracting(true);
 
     // Get item center in screen coords from the visual element
     const el = visualRef.current;
@@ -111,6 +145,7 @@ export function CanvasItem({
   const onResizeUp = useCallback((e: React.PointerEvent) => {
     if (!resizing.current) return;
     resizing.current = false;
+    setInteracting(false);
     (e.target as HTMLElement).releasePointerCapture(e.pointerId);
     onScaleCommit();
   }, [onScaleCommit]);
@@ -148,12 +183,14 @@ export function CanvasItem({
         }}
       >
         <motion.div
-          initial={{ opacity: 0, scale: 0.85 }}
-          animate={{ opacity: 1, scale: 1 }}
+          initial={{ opacity: 0, scale: scale * 0.85 }}
+          animate={{ opacity: 1, scale }}
           transition={{ type: 'spring', stiffness: 400, damping: 25 }}
-          style={{ transform: `scale(${scale})`, transformOrigin: 'center' }}
+          style={{ transformOrigin: 'center' }}
         >
-          {children}
+          <div ref={contentRef} style={{ width: 'fit-content', height: 'fit-content' }}>
+            {children}
+          </div>
         </motion.div>
       </div>
 
@@ -179,7 +216,7 @@ export function CanvasItem({
         onMouseEnter={handleMouseEnter}
         onMouseLeave={handleMouseLeave}
       >
-        {/* Selection / hover frame */}
+        {/* Selection / hover frame — tightly wraps the content */}
         <AnimatePresence>
           {showUI && (
             <motion.div
@@ -187,21 +224,28 @@ export function CanvasItem({
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
               transition={{ duration: 0.15 }}
-              style={{ position: 'absolute', inset: s(-4), pointerEvents: 'none' }}
+              style={{
+                position: 'absolute',
+                width: frameW,
+                height: frameH,
+                left: '50%',
+                top: '50%',
+                transform: 'translate(-50%, -50%)',
+                pointerEvents: 'none',
+              }}
             >
               <div style={{
                 width: '100%',
                 height: '100%',
-                borderRadius: s(8),
+                boxSizing: 'border-box',
                 border: selected
-                  ? `${s(1.5)}px solid rgba(59,130,246,0.8)`
-                  : `${s(1.5)}px dashed rgba(59,130,246,0.35)`,
-                background: selected ? 'rgba(59,130,246,0.03)' : 'transparent',
-                transition: 'border 0.15s, background 0.15s',
+                  ? `${s(2)}px solid #4C9EEB`
+                  : `${s(1.5)}px dashed rgba(59,130,246,0.3)`,
+                transition: 'border 0.15s',
               }} />
 
-              {/* Corner resize handles */}
-              {selected && CORNERS.map((corner, i) => (
+              {/* Corner square handles */}
+              {selected && CORNER_HANDLES.map((corner, i) => (
                 <motion.div
                   key={corner.key}
                   initial={{ scale: 0 }}
@@ -210,12 +254,11 @@ export function CanvasItem({
                   style={{
                     position: 'absolute',
                     ...corner.style(s),
-                    width: s(10),
-                    height: s(10),
-                    borderRadius: '50%',
-                    border: `${s(1.5)}px solid #3b82f6`,
+                    width: s(SQ),
+                    height: s(SQ),
+                    borderRadius: s(1),
+                    border: `${s(1.5)}px solid #4C9EEB`,
                     background: 'white',
-                    boxShadow: `0 ${s(1)}px ${s(2)}px rgba(0,0,0,0.1)`,
                     cursor: corner.cursor,
                     pointerEvents: 'auto',
                   }}
@@ -224,6 +267,50 @@ export function CanvasItem({
                   onPointerUp={onResizeUp}
                 />
               ))}
+
+              {/* Edge midpoint circle handles */}
+              {selected && EDGE_HANDLES.map((edge, i) => (
+                <motion.div
+                  key={edge.key}
+                  initial={{ scale: 0 }}
+                  animate={{ scale: 1 }}
+                  transition={{ type: 'spring', stiffness: 500, damping: 25, delay: 0.06 + i * 0.02 }}
+                  style={{
+                    position: 'absolute',
+                    ...edge.style(s),
+                    width: s(CI),
+                    height: s(CI),
+                    borderRadius: '50%',
+                    border: `${s(1.5)}px solid #4C9EEB`,
+                    background: 'white',
+                    cursor: edge.cursor,
+                    pointerEvents: 'auto',
+                  }}
+                  onPointerDown={onResizeDown}
+                  onPointerMove={onResizeMove}
+                  onPointerUp={onResizeUp}
+                />
+              ))}
+
+              {/* Dimension label — only during drag/resize */}
+              {interacting && <div style={{
+                position: 'absolute',
+                left: '50%',
+                top: '100%',
+                transform: 'translateX(-50%)',
+                marginTop: s(8),
+                background: '#4C9EEB',
+                color: 'white',
+                fontSize: s(11),
+                fontWeight: 500,
+                fontFamily: "'Geist', ui-monospace, SFMono-Regular, Menlo, monospace",
+                padding: `${s(2)}px ${s(6)}px`,
+                borderRadius: s(4),
+                whiteSpace: 'nowrap',
+                lineHeight: 1.4,
+              }}>
+                {frameW} x {frameH}
+              </div>}
             </motion.div>
           )}
         </AnimatePresence>

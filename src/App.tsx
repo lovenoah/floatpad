@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { FloatpadCanvas, DEFAULT_SETTINGS } from './canvas/canvas';
 import { InfoButton, SettingsButton } from './canvas/info-button';
@@ -69,11 +69,71 @@ const HELP_SECTIONS = [
 // ---------------------------------------------------------------------------
 
 const scrollStyle = `
-  .panel-scroll::-webkit-scrollbar { width: 14px; }
-  .panel-scroll::-webkit-scrollbar-track { background: transparent; margin: 4px 0 8px; }
-  .panel-scroll::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.12); border-radius: 10px; border: 4px solid transparent; background-clip: padding-box; }
-  .panel-scroll::-webkit-scrollbar-thumb:hover { background: rgba(0,0,0,0.2); border: 4px solid transparent; background-clip: padding-box; }
+  .panel-scroll { overflow-y: auto; scrollbar-width: none; -ms-overflow-style: none; }
+  .panel-scroll::-webkit-scrollbar { display: none; }
 `;
+
+function useCustomScrollbar() {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [thumbState, setThumbState] = useState({ top: 0, height: 0, visible: false });
+  const hideTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
+
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+
+    const update = () => {
+      const { scrollTop, scrollHeight, clientHeight, offsetTop } = el;
+      if (scrollHeight <= clientHeight) {
+        setThumbState(prev => ({ ...prev, visible: false }));
+        return;
+      }
+      const ratio = clientHeight / scrollHeight;
+      const thumbH = Math.max(ratio * clientHeight, 24);
+      const trackSpace = clientHeight - thumbH;
+      const scrollRatio = scrollTop / (scrollHeight - clientHeight);
+      setThumbState({ top: offsetTop + scrollRatio * trackSpace, height: thumbH, visible: true });
+
+      clearTimeout(hideTimer.current);
+      hideTimer.current = setTimeout(() => {
+        setThumbState(prev => ({ ...prev, visible: false }));
+      }, 1000);
+    };
+
+    el.addEventListener('scroll', update, { passive: true });
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    return () => { el.removeEventListener('scroll', update); ro.disconnect(); clearTimeout(hideTimer.current); };
+  }, []);
+
+  const thumb = (
+    <AnimatePresence>
+      {thumbState.visible && (
+        <motion.div
+          key="scrollbar"
+          initial={{ opacity: 0, scaleX: 0.3 }}
+          animate={{ opacity: 1, scaleX: 1 }}
+          exit={{ opacity: 0, scaleX: 0.3 }}
+          transition={{ type: 'spring', stiffness: 500, damping: 25 }}
+          style={{
+            position: 'absolute',
+            right: 3,
+            top: thumbState.top,
+            width: 4,
+            height: thumbState.height,
+            borderRadius: 2,
+            background: 'rgba(0,0,0,0.15)',
+            transformOrigin: 'right center',
+            pointerEvents: 'none',
+            zIndex: 10,
+          }}
+        />
+      )}
+    </AnimatePresence>
+  );
+
+  return { containerRef, thumb };
+}
 
 function PanelShell({ title, subtitle, onClose, children }: {
   title: string;
@@ -81,6 +141,8 @@ function PanelShell({ title, subtitle, onClose, children }: {
   onClose: () => void;
   children: React.ReactNode;
 }) {
+  const { containerRef, thumb } = useCustomScrollbar();
+
   return (
     <>
       <style>{scrollStyle}</style>
@@ -98,6 +160,7 @@ function PanelShell({ title, subtitle, onClose, children }: {
           justifyContent: 'center',
         }}
         onClick={onClose}
+        onWheel={e => e.stopPropagation()}
       >
         <div style={{
           position: 'absolute',
@@ -158,12 +221,17 @@ function PanelShell({ title, subtitle, onClose, children }: {
               </svg>
             </motion.button>
           </div>
-          <div className="panel-scroll" style={{
-            flex: 1, overflowY: 'auto',
-            padding: '8px 2px 20px 16px', marginBottom: 4,
-          }}>
+          <div
+            ref={containerRef}
+            className="panel-scroll"
+            style={{
+              flex: 1, overflowY: 'auto',
+              padding: '8px 16px 20px 16px', marginBottom: 4,
+            }}
+          >
             {children}
           </div>
+          {thumb}
         </motion.div>
       </motion.div>
     </>
