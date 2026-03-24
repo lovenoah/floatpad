@@ -201,6 +201,16 @@ export function FloatpadCanvas({ initialItems, renderers, settings: settingsOver
     });
   }, [pushHistory]);
 
+  // ── Rotation ───────────────────────────────────────────────────────
+  const handleRotationChange = useCallback((label: string, newRot: number) => {
+    setStates(prev => ({
+      ...prev,
+      [label]: { ...prev[label], rot: Math.round(newRot * 100) / 100 },
+    }));
+  }, []);
+
+  // handleScaleCommit doubles as rotation commit (same pattern: push history)
+
   // ── Gap adjustment (selection gaps) ──────────────────────────────────
   const handleGapPositionUpdate = useCallback((label: string, x: number, y: number) => {
     setStates(prev => ({
@@ -704,6 +714,8 @@ export function FloatpadCanvas({ initialItems, renderers, settings: settingsOver
               onDragEnd={commitDrag}
               onScaleChange={(newScale) => handleScaleChange(item.label, newScale)}
               onScaleCommit={handleScaleCommit}
+              onRotationChange={(newRot) => handleRotationChange(item.label, newRot)}
+              onRotationCommit={handleScaleCommit}
               selected={selection.has(item.label)}
               onSelect={handleSelect}
               onHover={setHoveredItem}

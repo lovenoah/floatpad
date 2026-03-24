@@ -4,8 +4,6 @@ import type { ItemState } from './types';
 
 // Figma-style handles: filled squares at corners, circles at edge midpoints
 const SQ = 8; // corner square size
-const CI = 7; // midpoint circle size
-
 const CORNER_HANDLES = [
   { key: 'tl', style: (s: (n: number) => number) => ({ top: s(-SQ / 2), left: s(-SQ / 2) }), cursor: 'nwse-resize' },
   { key: 'tr', style: (s: (n: number) => number) => ({ top: s(-SQ / 2), right: s(-SQ / 2) }), cursor: 'nesw-resize' },
@@ -13,12 +11,18 @@ const CORNER_HANDLES = [
   { key: 'br', style: (s: (n: number) => number) => ({ bottom: s(-SQ / 2), right: s(-SQ / 2) }), cursor: 'nwse-resize' },
 ];
 
-const EDGE_HANDLES = [
-  { key: 'top', style: (s: (n: number) => number) => ({ top: s(-CI / 2), left: '50%', marginLeft: s(-CI / 2) }), cursor: 'ns-resize' },
-  { key: 'bottom', style: (s: (n: number) => number) => ({ bottom: s(-CI / 2), left: '50%', marginLeft: s(-CI / 2) }), cursor: 'ns-resize' },
-  { key: 'left', style: (s: (n: number) => number) => ({ left: s(-CI / 2), top: '50%', marginTop: s(-CI / 2) }), cursor: 'ew-resize' },
-  { key: 'right', style: (s: (n: number) => number) => ({ right: s(-CI / 2), top: '50%', marginTop: s(-CI / 2) }), cursor: 'ew-resize' },
+// Rotation zones: invisible areas just outside each corner
+const ROTATION_SIZE = 16;
+const ROT_OFFSET = ROTATION_SIZE / 2 + SQ / 2 + 1;
+const ROTATION_ZONES = [
+  { key: 'rot-tl', style: (s: (n: number) => number) => ({ top: s(-ROT_OFFSET), left: s(-ROT_OFFSET) }) },
+  { key: 'rot-tr', style: (s: (n: number) => number) => ({ top: s(-ROT_OFFSET), right: s(-ROT_OFFSET) }) },
+  { key: 'rot-bl', style: (s: (n: number) => number) => ({ bottom: s(-ROT_OFFSET), left: s(-ROT_OFFSET) }) },
+  { key: 'rot-br', style: (s: (n: number) => number) => ({ bottom: s(-ROT_OFFSET), right: s(-ROT_OFFSET) }) },
 ];
+
+// Rotation cursor (small curved arrow)
+const ROTATE_CURSOR = `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='%23333' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M21 12a9 9 0 1 1-6.219-8.56'/%3E%3Cpath d='M21 3v5h-5'/%3E%3C/svg%3E") 12 12, crosshair`;
 
 export function CanvasItem({
   label,
@@ -31,6 +35,8 @@ export function CanvasItem({
   onDragEnd,
   onScaleChange,
   onScaleCommit,
+  onRotationChange,
+  onRotationCommit,
   selected,
   onSelect,
   onHover,
@@ -46,6 +52,8 @@ export function CanvasItem({
   onDragEnd: () => void;
   onScaleChange: (scale: number) => void;
   onScaleCommit: () => void;
+  onRotationChange: (rot: number) => void;
+  onRotationCommit: () => void;
   selected: boolean;
   onSelect: (label: string | null, shiftKey: boolean) => void;
   onHover: (label: string | null) => void;
@@ -53,10 +61,13 @@ export function CanvasItem({
 }) {
   const [hovered, setHovered] = useState(false);
   const [interacting, setInteracting] = useState(false);
+  const [rotating, setRotating] = useState(false);
   const dragging = useRef(false);
   const resizing = useRef(false);
+  const rotatingRef = useRef(false);
   const dragStart = useRef({ mx: 0, my: 0 });
   const resizeStart = useRef({ scale: 1, dist: 0, cx: 0, cy: 0 });
+  const rotateStart = useRef({ startRot: 0, startAngle: 0, cx: 0, cy: 0 });
   const visualRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   const [contentSize, setContentSize] = useState<{ w: number; h: number } | null>(null);
@@ -149,6 +160,47 @@ export function CanvasItem({
     (e.target as HTMLElement).releasePointerCapture(e.pointerId);
     onScaleCommit();
   }, [onScaleCommit]);
+
+  // ── Rotation handlers ──────────────────────────────────────────────
+  const onRotateDown = useCallback((e: React.PointerEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    (e.target as HTMLElement).setPointerCapture(e.pointerId);
+    rotatingRef.current = true;
+    setRotating(true);
+    setInteracting(true);
+
+    const el = visualRef.current;
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    const cx = rect.left + rect.width / 2;
+    const cy = rect.top + rect.height / 2;
+    const startAngle = Math.atan2(e.clientY - cy, e.clientX - cx) * (180 / Math.PI);
+
+    rotateStart.current = { startRot: rot, startAngle, cx, cy };
+  }, [rot]);
+
+  const onRotateMove = useCallback((e: React.PointerEvent) => {
+    if (!rotatingRef.current) return;
+    const { startRot, startAngle, cx, cy } = rotateStart.current;
+    const currentAngle = Math.atan2(e.clientY - cy, e.clientX - cx) * (180 / Math.PI);
+    let newRot = startRot + (currentAngle - startAngle);
+    // Snap to 0/90/180/270 when within 2 degrees
+    const snap = [0, 90, 180, 270, -90, -180, -270, 360];
+    for (const s of snap) {
+      if (Math.abs(newRot - s) < 2) { newRot = s; break; }
+    }
+    onRotationChange(newRot);
+  }, [onRotationChange]);
+
+  const onRotateUp = useCallback((e: React.PointerEvent) => {
+    if (!rotatingRef.current) return;
+    rotatingRef.current = false;
+    setRotating(false);
+    setInteracting(false);
+    (e.target as HTMLElement).releasePointerCapture(e.pointerId);
+    onRotationCommit();
+  }, [onRotationCommit]);
 
   // ── Hover ──────────────────────────────────────────────────────────
   const handleMouseEnter = useCallback(() => {
@@ -244,6 +296,24 @@ export function CanvasItem({
                 transition: 'border 0.15s',
               }} />
 
+              {/* Rotation zones — invisible areas outside each corner */}
+              {selected && ROTATION_ZONES.map(zone => (
+                <div
+                  key={zone.key}
+                  style={{
+                    position: 'absolute',
+                    ...zone.style(s),
+                    width: s(ROTATION_SIZE),
+                    height: s(ROTATION_SIZE),
+                    cursor: ROTATE_CURSOR,
+                    pointerEvents: 'auto',
+                  }}
+                  onPointerDown={onRotateDown}
+                  onPointerMove={onRotateMove}
+                  onPointerUp={onRotateUp}
+                />
+              ))}
+
               {/* Corner square handles */}
               {selected && CORNER_HANDLES.map((corner, i) => (
                 <motion.div
@@ -268,31 +338,8 @@ export function CanvasItem({
                 />
               ))}
 
-              {/* Edge midpoint circle handles */}
-              {selected && EDGE_HANDLES.map((edge, i) => (
-                <motion.div
-                  key={edge.key}
-                  initial={{ scale: 0 }}
-                  animate={{ scale: 1 }}
-                  transition={{ type: 'spring', stiffness: 500, damping: 25, delay: 0.06 + i * 0.02 }}
-                  style={{
-                    position: 'absolute',
-                    ...edge.style(s),
-                    width: s(CI),
-                    height: s(CI),
-                    borderRadius: '50%',
-                    border: `${s(1.5)}px solid #4C9EEB`,
-                    background: 'white',
-                    cursor: edge.cursor,
-                    pointerEvents: 'auto',
-                  }}
-                  onPointerDown={onResizeDown}
-                  onPointerMove={onResizeMove}
-                  onPointerUp={onResizeUp}
-                />
-              ))}
 
-              {/* Dimension label — only during drag/resize */}
+              {/* Dimension / rotation label — only during interaction */}
               {interacting && <div style={{
                 position: 'absolute',
                 left: '50%',
@@ -309,7 +356,7 @@ export function CanvasItem({
                 whiteSpace: 'nowrap',
                 lineHeight: 1.4,
               }}>
-                {frameW} x {frameH}
+                {rotating ? `${Math.round(rot)}°` : `${frameW} × ${frameH}`}
               </div>}
             </motion.div>
           )}
