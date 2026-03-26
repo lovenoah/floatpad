@@ -1,7 +1,6 @@
 import { useState, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-
-const FONT = "'Geist', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif";
+import { FONT, C_SURFACE_ELEVATED, C_VALUE, SHADOW_TOAST } from './tokens';
 
 export type ToastFn = (message: string) => void;
 
@@ -45,14 +44,15 @@ export function useToast(duration = 1600): [ToastFn, React.ReactNode] {
             style={{
               padding: '7px 16px',
               borderRadius: 10,
-              background: 'rgba(255, 255, 255, 0.97)',
+              background: C_SURFACE_ELEVATED,
               backdropFilter: 'blur(20px)',
-              color: '#374151',
+              WebkitBackdropFilter: 'blur(20px)',
+              color: C_VALUE,
               fontSize: 12,
               fontWeight: 500,
               fontFamily: FONT,
               letterSpacing: '-0.01em',
-              boxShadow: '0 4px 20px rgba(0,0,0,0.08), 0 0 0 1px rgba(0,0,0,0.06)',
+              boxShadow: SHADOW_TOAST,
               whiteSpace: 'nowrap',
               overflow: 'hidden',
             }}

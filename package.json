@@ -1,14 +1,32 @@
 {
   "name": "justanudge",
   "version": "0.1.0",
-  "private": true,
+  "description": "A precision canvas tool for pixel-perfect element positioning",
+  "keywords": [
+    "design",
+    "canvas",
+    "positioning",
+    "nudge",
+    "layout",
+    "dev-tool"
+  ],
+  "license": "MIT",
   "type": "module",
+  "bin": {
+    "justanudge": "./bin/justanudge.mjs"
+  },
+  "files": [
+    "dist",
+    "bin"
+  ],
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "prepublishOnly": "npm run build"
   },
   "dependencies": {
+    "lucide-react": "^1.6.0",
     "motion": "^11.0.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0"

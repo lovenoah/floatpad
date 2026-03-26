@@ -1,11 +1,20 @@
 import type { ItemDef } from '../canvas/types';
 import type { Renderer } from '../canvas/canvas';
+import { ShapeRendererComponent } from '../canvas/shape-renderer';
+import { TextRendererComponent } from '../canvas/text-renderer';
+import { FrameRendererComponent } from '../canvas/frame-renderer';
 
 // ---------------------------------------------------------------------------
-// Demo renderers — simple colored shapes to illustrate the tool
+// Renderers
 // ---------------------------------------------------------------------------
 
 export const DEMO_RENDERERS: Record<string, Renderer> = {
+  Shape: (p) => <ShapeRendererComponent props={p} />,
+  Text: (p) => <TextRendererComponent props={p} />,
+  Frame: (p) => <FrameRendererComponent props={p} />,
+  Group: () => null,
+
+  // Legacy renderers — kept for backwards compatibility with saved layouts
   Circle: (p) => {
     const size = (p.size as number) ?? 80;
     const color = (p.color as string) ?? '#6366f1';
@@ -57,13 +66,76 @@ export const DEMO_RENDERERS: Record<string, Renderer> = {
   },
 };
 
+// ---------------------------------------------------------------------------
+// Helper for Shape item definitions
+// ---------------------------------------------------------------------------
+
+const shadow = { x: 0, y: 4, blur: 8, color: '#000000', opacity: 0.08 };
+
+function shape(
+  label: string,
+  pos: { x: number; y: number; rot?: number; z?: number },
+  geo: { type: string; w: number; h: number; borderRadius?: number; pathData?: string; viewBox?: string },
+  fill: string,
+  extra?: Record<string, unknown>,
+): ItemDef {
+  return {
+    label,
+    type: 'Shape',
+    x: pos.x,
+    y: pos.y,
+    w: geo.w,
+    h: geo.h,
+    rot: pos.rot ?? 0,
+    z: pos.z ?? 0,
+    props: {
+      shapeType: geo.type,
+      shapeWidth: geo.w,
+      shapeHeight: geo.h,
+      borderRadius: geo.borderRadius ?? 0,
+      pathData: geo.pathData,
+      viewBox: geo.viewBox,
+      fills: [{ type: 'solid', color: fill, opacity: 1 }],
+      strokes: [],
+      shadows: [shadow],
+      blur: 0,
+      ...extra,
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Demo items — all using the Shape renderer
+// ---------------------------------------------------------------------------
+
+const STAR_PATH = 'M20 4L23.5 15H35L26 22L29.5 33L20 26L10.5 33L14 22L5 15H16.5L20 4Z';
+
 export const DEMO_ITEMS: ItemDef[] = [
-  { label: 'Circle1', type: 'Circle', x: -180, y: -80, w: 90, h: 90, rot: 0, z: 0, props: { size: 80, color: '#6366f1' } },
-  { label: 'Circle2', type: 'Circle', x: 160, y: 100, w: 70, h: 70, rot: 0, z: 0, props: { size: 60, color: '#ec4899' } },
-  { label: 'Card1', type: 'RoundedRect', x: 0, y: -60, w: 140, h: 80, rot: -5, z: 0, props: { w: 120, h: 70, color: '#f59e0b' } },
-  { label: 'Card2', type: 'RoundedRect', x: 120, y: -120, w: 110, h: 65, rot: 8, z: 0, props: { w: 100, h: 55, color: '#3b82f6' } },
-  { label: 'Pill1', type: 'Pill', x: -120, y: 80, w: 110, h: 40, rot: -10, z: 0, props: { w: 100, h: 36, color: '#10b981', text: '+84%' } },
-  { label: 'Pill2', type: 'Pill', x: 80, y: -180, w: 90, h: 36, rot: 12, z: 0, props: { w: 80, h: 32, color: '#10b981', text: '+42%' } },
-  { label: 'Star1', type: 'Star', x: -60, y: 160, w: 40, h: 40, rot: -15, z: 0, props: { size: 36, color: '#f97316' } },
-  { label: 'Star2', type: 'Star', x: 200, y: 60, w: 32, h: 32, rot: 20, z: 0, props: { size: 28, color: '#8b5cf6' } },
+  shape('Ellipse1', { x: -180, y: -80 },
+    { type: 'ellipse', w: 80, h: 80 }, '#6366f1'),
+
+  shape('Ellipse2', { x: 160, y: 100 },
+    { type: 'ellipse', w: 60, h: 60 }, '#ec4899'),
+
+  shape('Card1', { x: 0, y: -60, rot: -5 },
+    { type: 'rectangle', w: 120, h: 70, borderRadius: 16 }, '#f59e0b'),
+
+  shape('Card2', { x: 120, y: -120, rot: 8 },
+    { type: 'rectangle', w: 100, h: 55, borderRadius: 16 }, '#3b82f6'),
+
+  shape('Badge1', { x: -120, y: 80, rot: -10 },
+    { type: 'rectangle', w: 100, h: 36, borderRadius: 999 }, '#10b981',
+    { text: '+84%', textColor: 'white', textSize: 13 }),
+
+  shape('Badge2', { x: 80, y: -180, rot: 12 },
+    { type: 'rectangle', w: 80, h: 32, borderRadius: 999 }, '#10b981',
+    { text: '+42%', textColor: 'white', textSize: 13 }),
+
+  shape('Star1', { x: -60, y: 160, rot: -15 },
+    { type: 'vector', w: 36, h: 36, pathData: STAR_PATH, viewBox: '0 0 40 40' }, '#f97316',
+    { shadows: [] }),
+
+  shape('Star2', { x: 200, y: 60, rot: 20 },
+    { type: 'vector', w: 28, h: 28, pathData: STAR_PATH, viewBox: '0 0 40 40' }, '#8b5cf6',
+    { shadows: [] }),
 ];

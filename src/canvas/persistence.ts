@@ -1,4 +1,4 @@
-import type { ItemDef, ItemState } from './types';
+import type { ItemDef, ItemState, NudgeSettings } from './types';
 
 const LAYOUT_ENDPOINT = '/__justanudge/layout';
 const SAVE_ENDPOINT = '/__justanudge/save';
@@ -6,6 +6,7 @@ const SAVE_ENDPOINT = '/__justanudge/save';
 export type LayoutData = {
   items: ItemDef[];
   states: Record<string, ItemState>;
+  settings?: Partial<NudgeSettings>;
 };
 
 /**
@@ -67,6 +68,23 @@ export async function saveLayoutNow(data: LayoutData): Promise<boolean> {
     return res.ok;
   } catch {
     return false;
+  }
+}
+
+/**
+ * Flush any pending debounced save immediately (e.g. on beforeunload).
+ * Uses sendBeacon so it works even during page teardown.
+ */
+export function flushPendingSave() {
+  if (saveTimer) clearTimeout(saveTimer);
+  if (!pendingData) return;
+  const data = pendingData;
+  pendingData = null;
+  try {
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+    navigator.sendBeacon(SAVE_ENDPOINT, blob);
+  } catch {
+    // Silent — page is closing
   }
 }
 

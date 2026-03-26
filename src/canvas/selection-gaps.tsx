@@ -1,7 +1,6 @@
 import { useState, useCallback, useRef } from 'react';
 import type { ItemDef, ItemState } from './types';
-
-const FONT = "'Geist', ui-monospace, SFMono-Regular, Menlo, monospace";
+import { FONT } from './tokens';
 const COLOR = 'rgba(236, 72, 153, 0.9)';
 const BG = 'rgb(236, 72, 153)';
 
@@ -157,7 +156,7 @@ export function SelectionGaps({
 
   return (
     <>
-      {gaps.map((gap, i) => (
+      {gaps.map((gap) => (
         <GapIndicator
           key={`${gap.axis}-${gap.fixedLabel}-${gap.moveLabel}`}
           gap={gap}

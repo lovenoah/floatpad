@@ -188,21 +188,26 @@ function MeasureLabel({
 }: {
   x: number; y: number; zoom: number; color: string; children: React.ReactNode; anchor?: 'start' | 'middle' | 'end';
 }) {
+  const text = String(children);
+  // Dynamically size the box based on digit count: ~6.5px per char + 10px padding
+  const boxW = Math.max(28, text.length * 6.5 + 10);
+  const halfW = boxW / 2;
+
   return (
     <g transform={`translate(${x}, ${y}) scale(${1 / zoom})`}>
       <rect
-        x={anchor === 'middle' ? -14 : -2}
+        x={anchor === 'middle' ? -halfW : -2}
         y={-8}
-        width={28}
+        width={boxW}
         height={16}
         rx={4}
         fill={color}
         opacity={0.95}
       />
       <text
-        x={anchor === 'middle' ? 0 : 12}
+        x={anchor === 'middle' ? 0 : halfW - 2}
         y={4}
-        textAnchor={anchor}
+        textAnchor={anchor === 'middle' ? 'middle' : 'start'}
         fill="white"
         fontSize={10}
         fontWeight={600}

@@ -1,18 +1,25 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
+import { Minus, Plus, RotateCcw, RotateCw, ArrowDown, ArrowUp, Layers, GripVertical, Lock, Unlock, X } from 'lucide-react';
 import { StepButton } from './step-button';
 import { InfoButton, SettingsButton } from './info-button';
 import type { ItemState } from './types';
-
-const FONT = "'Geist', ui-monospace, SFMono-Regular, Menlo, monospace";
+import {
+  FONT, C_LABEL, C_VALUE, C_MUTED, C_ICON, C_PLACEHOLDER,
+  C_SURFACE_ELEVATED, C_ACCENT, C_ACCENT_BG, C_ACCENT_TEXT,
+  C_HOVER, C_INPUT_BG, C_INPUT_BG_ACTIVE, C_INPUT_BORDER_FOCUS,
+  C_DIVIDER,
+  C_BADGE_BG, C_BADGE_BG_OPEN, C_BADGE_TEXT,
+  SHADOW_MD,
+} from './tokens';
 
 const inputBase: React.CSSProperties = {
   borderRadius: 6,
-  background: '#f4f5f6',
+  background: C_INPUT_BG,
   padding: '5px 0',
   fontSize: 11,
   fontWeight: 500,
-  color: '#374151',
+  color: C_VALUE,
   border: '1px solid transparent',
   outline: 'none',
   textAlign: 'center',
@@ -26,16 +33,20 @@ function NumericInput({
   onChange,
   suffix = '',
   width = 44,
+  step = 1,
 }: {
   value: number;
   mixed?: boolean;
   onChange: (v: number) => void;
   suffix?: string;
   width?: number;
+  step?: number;
 }) {
   const display = mixed ? '\u2014' : (suffix ? `${value}${suffix}` : String(value));
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(display);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const scrubRef = useRef<{ startX: number; startVal: number; active: boolean } | null>(null);
 
   useEffect(() => {
     if (!editing) setDraft(display);
@@ -45,18 +56,43 @@ function NumericInput({
     setEditing(false);
     const cleaned = draft.replace(/[^0-9.\-]/g, '');
     const num = parseFloat(cleaned);
-    if (!isNaN(num)) {
-      onChange(num);
-    }
+    if (!isNaN(num)) onChange(Math.round(num * 100) / 100);
   }, [draft, onChange]);
+
+  const handlePointerDown = useCallback((e: React.PointerEvent) => {
+    e.stopPropagation();
+    if (editing) return;
+    e.preventDefault();
+    (e.target as HTMLElement).setPointerCapture(e.pointerId);
+    scrubRef.current = { startX: e.clientX, startVal: value, active: false };
+  }, [editing, value]);
+
+  const handlePointerMove = useCallback((e: React.PointerEvent) => {
+    if (!scrubRef.current) return;
+    const dx = e.clientX - scrubRef.current.startX;
+    if (!scrubRef.current.active && Math.abs(dx) < 3) return;
+    scrubRef.current.active = true;
+    const sensitivity = e.shiftKey ? step * 10 : step;
+    onChange(Math.round((scrubRef.current.startVal + dx * sensitivity) * 100) / 100);
+  }, [onChange, step]);
+
+  const handlePointerUp = useCallback((e: React.PointerEvent) => {
+    if (!scrubRef.current) return;
+    const wasScrubbing = scrubRef.current.active;
+    scrubRef.current = null;
+    (e.target as HTMLElement).releasePointerCapture(e.pointerId);
+    if (!wasScrubbing) inputRef.current?.focus();
+  }, []);
 
   return (
     <input
+      ref={inputRef}
       style={{
         ...inputBase,
         width,
-        color: mixed && !editing ? '#9ca3af' : '#374151',
-        ...(editing ? { borderColor: 'rgba(59,130,246,0.5)', background: '#fff' } : {}),
+        color: mixed && !editing ? C_MUTED : C_VALUE,
+        cursor: editing ? 'text' : 'ew-resize',
+        ...(editing ? { borderColor: C_INPUT_BORDER_FOCUS, background: C_INPUT_BG_ACTIVE } : {}),
       }}
       value={editing ? draft : display}
       onFocus={() => {
@@ -74,7 +110,9 @@ function NumericInput({
           (e.target as HTMLInputElement).blur();
         }
       }}
-      onPointerDown={e => e.stopPropagation()}
+      onPointerDown={handlePointerDown}
+      onPointerMove={handlePointerMove}
+      onPointerUp={handlePointerUp}
       spellCheck={false}
     />
   );
@@ -85,6 +123,8 @@ type SingleProps = {
   mode: 'single';
   label: string;
   state: ItemState;
+  initW: number;
+  initH: number;
   onRename: (newLabel: string) => void;
 };
 
@@ -104,11 +144,13 @@ type LayerInfo = { label: string; z: number; preview?: React.ReactNode };
 
 type ControlPanelProps = (SingleProps | MultiProps) & {
   copied: boolean;
+  locked: boolean;
   onCommitChange: (patch: Partial<ItemState>) => void;
   onDeltaChange?: (delta: Partial<ItemState>) => void;
   onDuplicate: () => void;
   onDelete: () => void;
   onPlace: () => void;
+  onToggleLock: () => void;
   onInfoClick?: () => void;
   onSettingsClick?: () => void;
   layers: LayerInfo[];
@@ -123,17 +165,24 @@ function allSame(states: ItemState[], key: keyof ItemState): boolean {
 }
 
 export function ControlPanel(props: ControlPanelProps) {
-  const { copied, onCommitChange, onDuplicate, onDelete, onPlace, onInfoClick, onSettingsClick, layers, onReorderAllZ, onRenameLayer } = props;
+  const { copied, locked, onCommitChange, onDuplicate, onDelete, onPlace, onToggleLock, onInfoClick, onSettingsClick, layers, onReorderAllZ, onRenameLayer } = props;
   const onDelta = props.onDeltaChange;
 
   const isSingle = props.mode === 'single';
   const state = isSingle ? props.state : props.states[0];
   const multiStates = isSingle ? [props.state] : props.states;
 
-  const { scale, rot, z = 0 } = state;
+  const { scale, rot, z = 0, opacity = 1 } = state;
   const scaleMixed = !allSame(multiStates, 'scale');
   const rotMixed = !allSame(multiStates, 'rot');
   const zMixed = !allSame(multiStates, 'z');
+  const opacityMixed = !allSame(multiStates, 'opacity');
+
+  // Computed pixel dimensions (single only)
+  const initW = isSingle ? props.initW : 0;
+  const initH = isSingle ? props.initH : 0;
+  const pixelW = Math.round(initW * scale);
+  const pixelH = Math.round(initH * scale);
 
   const [editingLabel, setEditingLabel] = useState(isSingle ? props.label : '');
   const [labelEditing, setLabelEditing] = useState(false);
@@ -163,12 +212,11 @@ export function ControlPanel(props: ControlPanelProps) {
       <div style={{
         display: 'flex',
         alignItems: 'center',
-        gap: 6,
-        borderRadius: 16,
-        background: 'rgba(255,255,255,0.97)',
-        padding: '6px 8px',
-        boxShadow: '0 8px 32px rgba(0,0,0,0.10), 0 0 0 1px rgba(0,0,0,0.06)',
-        backdropFilter: 'blur(24px)',
+        gap: 4,
+        borderRadius: 10,
+        background: C_SURFACE_ELEVATED,
+        padding: '4px 6px',
+        boxShadow: SHADOW_MD,
         fontFamily: FONT,
         pointerEvents: 'auto',
       }}>
@@ -182,13 +230,13 @@ export function ControlPanel(props: ControlPanelProps) {
               width: 'auto',
               minWidth: 48,
               maxWidth: 120,
-              borderRadius: 8,
-              background: labelEditing ? '#fff' : '#eff6ff',
-              padding: '5px 10px',
+              borderRadius: 6,
+              background: labelEditing ? C_INPUT_BG_ACTIVE : C_ACCENT_BG,
+              padding: '4px 10px',
               fontSize: 11,
               fontWeight: 600,
-              color: '#2563eb',
-              border: labelEditing ? '1px solid rgba(59,130,246,0.5)' : '1px solid transparent',
+              color: C_ACCENT_TEXT,
+              border: labelEditing ? `1px solid ${C_INPUT_BORDER_FOCUS}` : '1px solid transparent',
               outline: 'none',
               fontFamily: FONT,
               cursor: labelEditing ? 'text' : 'default',
@@ -241,27 +289,49 @@ export function ControlPanel(props: ControlPanelProps) {
               <NumericInput value={props.state.y} onChange={v => onCommitChange({ y: Math.round(v) })} width={46} />
             </Group>
             <Divider />
+            <Group>
+              <Label>W</Label>
+              <NumericInput
+                value={pixelW}
+                onChange={v => {
+                  const newScale = Math.max(0.1, Math.min(4, v / (initW || 1)));
+                  onCommitChange({ scale: Math.round(newScale * 100) / 100 });
+                }}
+                width={46}
+              />
+              <Label>H</Label>
+              <NumericInput
+                value={pixelH}
+                onChange={v => {
+                  const newScale = Math.max(0.1, Math.min(4, v / (initH || 1)));
+                  onCommitChange({ scale: Math.round(newScale * 100) / 100 });
+                }}
+                width={46}
+              />
+            </Group>
+            <Divider />
           </>
         )}
 
         {/* Scale */}
         <Group>
-          <StepButton onClick={() => onDelta ? onDelta({ scale: -0.1 }) : onCommitChange({ scale: Math.round(Math.max(0.1, scale - 0.1) * 100) / 100 })}>−</StepButton>
+          <StepButton onClick={() => onDelta ? onDelta({ scale: -0.1 }) : onCommitChange({ scale: Math.round(Math.max(0.1, scale - 0.1) * 100) / 100 })}><Minus size={10} strokeWidth={2} /></StepButton>
           <NumericInput
             value={Math.round(scale * 10) / 10}
             mixed={scaleMixed}
             onChange={v => onCommitChange({ scale: Math.max(0.1, Math.min(4, v)) })}
             suffix="×"
             width={42}
+            step={0.1}
           />
-          <StepButton onClick={() => onDelta ? onDelta({ scale: 0.1 }) : onCommitChange({ scale: Math.round(Math.min(4, scale + 0.1) * 100) / 100 })}>+</StepButton>
+          <StepButton onClick={() => onDelta ? onDelta({ scale: 0.1 }) : onCommitChange({ scale: Math.round(Math.min(4, scale + 0.1) * 100) / 100 })}><Plus size={10} strokeWidth={2} /></StepButton>
         </Group>
 
         <Divider />
 
         {/* Rotation */}
         <Group>
-          <StepButton onClick={() => onDelta ? onDelta({ rot: -1 }) : onCommitChange({ rot: Math.round((rot - 1) * 100) / 100 })}>↺</StepButton>
+          <StepButton onClick={() => onDelta ? onDelta({ rot: -1 }) : onCommitChange({ rot: Math.round((rot - 1) * 100) / 100 })}><RotateCcw size={10} strokeWidth={2} /></StepButton>
           <NumericInput
             value={Math.round(rot * 100) / 100}
             mixed={rotMixed}
@@ -269,14 +339,28 @@ export function ControlPanel(props: ControlPanelProps) {
             suffix="°"
             width={42}
           />
-          <StepButton onClick={() => onDelta ? onDelta({ rot: 1 }) : onCommitChange({ rot: Math.round((rot + 1) * 100) / 100 })}>↻</StepButton>
+          <StepButton onClick={() => onDelta ? onDelta({ rot: 1 }) : onCommitChange({ rot: Math.round((rot + 1) * 100) / 100 })}><RotateCw size={10} strokeWidth={2} /></StepButton>
+        </Group>
+
+        <Divider />
+
+        {/* Opacity */}
+        <Group>
+          <Label>O</Label>
+          <NumericInput
+            value={Math.round(opacity * 100)}
+            mixed={opacityMixed}
+            onChange={v => onCommitChange({ opacity: Math.max(0, Math.min(100, Math.round(v))) / 100 })}
+            suffix="%"
+            width={48}
+          />
         </Group>
 
         <Divider />
 
         {/* Z-index */}
         <Group>
-          <StepButton onClick={() => onDelta ? onDelta({ z: -1 }) : onCommitChange({ z: z - 1 })}>↓</StepButton>
+          <StepButton onClick={() => onDelta ? onDelta({ z: -1 }) : onCommitChange({ z: z - 1 })}><ArrowDown size={10} strokeWidth={2} /></StepButton>
           <Label>Z</Label>
           <NumericInput
             value={z}
@@ -284,7 +368,7 @@ export function ControlPanel(props: ControlPanelProps) {
             onChange={v => onCommitChange({ z: Math.round(v) })}
             width={34}
           />
-          <StepButton onClick={() => onDelta ? onDelta({ z: 1 }) : onCommitChange({ z: z + 1 })}>↑</StepButton>
+          <StepButton onClick={() => onDelta ? onDelta({ z: 1 }) : onCommitChange({ z: z + 1 })}><ArrowUp size={10} strokeWidth={2} /></StepButton>
           <LayersButton layers={layers} onReorderZ={onReorderAllZ} onRename={onRenameLayer} />
         </Group>
 
@@ -297,6 +381,31 @@ export function ControlPanel(props: ControlPanelProps) {
           {isSingle && (
             <ActionButton onClick={() => onCommitChange({ x: 0, y: 0, scale: 1, rot: 0, z: 0 })} title="Reset to defaults">Reset</ActionButton>
           )}
+          <motion.button
+            whileHover={{ background: locked ? 'rgba(251,191,36,0.18)' : C_HOVER }}
+            whileTap={{ scale: 0.93 }}
+            title={locked ? 'Unlock' : 'Lock'}
+            style={{
+              borderRadius: 6,
+              padding: '5px 6px',
+              fontSize: 11,
+              fontWeight: 500,
+              color: locked ? '#d97706' : C_ICON,
+              background: locked ? 'rgba(251,191,36,0.12)' : 'transparent',
+              border: 'none',
+              cursor: 'pointer',
+              fontFamily: FONT,
+              display: 'flex',
+              alignItems: 'center',
+            }}
+            onPointerDown={e => e.stopPropagation()}
+            onClick={e => { e.stopPropagation(); onToggleLock(); }}
+          >
+            {locked
+              ? <Lock size={12} strokeWidth={2} />
+              : <Unlock size={12} strokeWidth={2} />
+            }
+          </motion.button>
         </Group>
 
         {/* Place */}
@@ -304,12 +413,12 @@ export function ControlPanel(props: ControlPanelProps) {
           whileHover={{ scale: 1.03 }}
           whileTap={{ scale: 0.95 }}
           style={{
-            borderRadius: 8,
-            padding: '5px 14px',
+            borderRadius: 6,
+            padding: '4px 12px',
             fontSize: 11,
             fontWeight: 600,
             color: '#fff',
-            background: copied ? '#16a34a' : '#3b82f6',
+            background: copied ? '#16a34a' : C_ACCENT,
             border: 'none',
             cursor: 'pointer',
             transition: 'background 0.15s',
@@ -432,7 +541,7 @@ function LayersButton({
       onMouseLeave={leaveContainer}
     >
       <motion.button
-        whileHover={{ background: '#f3f4f6', borderColor: '#d1d5db' }}
+        whileHover={{ background: C_HOVER }}
         whileTap={{ scale: 0.9 }}
         style={{
           display: 'flex',
@@ -440,12 +549,11 @@ function LayersButton({
           justifyContent: 'center',
           width: 24,
           height: 24,
-          borderRadius: 6,
-          background: open ? '#f3f4f6' : 'white',
-          border: '1px solid #e5e7eb',
-          boxShadow: '0 1px 2px rgba(0,0,0,0.06)',
+          borderRadius: 5,
+          background: open ? C_HOVER : 'transparent',
+          border: 'none',
           cursor: 'pointer',
-          color: '#6b7280',
+          color: C_ICON,
           fontFamily: FONT,
           padding: 0,
         }}
@@ -453,10 +561,7 @@ function LayersButton({
         onClick={e => { e.stopPropagation(); setOpen(prev => !prev); }}
         title="Layers"
       >
-        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round">
-          <path d="M8 2L1.5 6L8 10L14.5 6L8 2Z" />
-          <path d="M1.5 10L8 14L14.5 10" />
-        </svg>
+        <Layers size={14} strokeWidth={1.5} />
       </motion.button>
 
       <AnimatePresence>
@@ -474,8 +579,8 @@ function LayersButton({
               marginBottom: 16,
               minWidth: 210,
               borderRadius: 12,
-              background: 'rgba(255,255,255,0.97)',
-              boxShadow: '0 8px 32px rgba(0,0,0,0.10), 0 0 0 1px rgba(0,0,0,0.06)',
+              background: C_SURFACE_ELEVATED,
+              boxShadow: SHADOW_MD,
               backdropFilter: 'blur(24px)',
               padding: '4px',
               fontFamily: FONT,
@@ -617,11 +722,11 @@ function SelectionBadge({
       <div
         style={{
           borderRadius: 8,
-          background: open ? '#e8e8ea' : '#f0f0f1',
+          background: open ? C_BADGE_BG_OPEN : C_BADGE_BG,
           padding: '5px 10px',
           fontSize: 11,
           fontWeight: 600,
-          color: '#6b7280',
+          color: C_BADGE_TEXT,
           userSelect: 'none',
           cursor: 'default',
           transition: 'background 0.15s',
@@ -644,8 +749,8 @@ function SelectionBadge({
               marginBottom: 8,
               minWidth: 210,
               borderRadius: 12,
-              background: 'rgba(255,255,255,0.97)',
-              boxShadow: '0 8px 32px rgba(0,0,0,0.10), 0 0 0 1px rgba(0,0,0,0.06)',
+              background: C_SURFACE_ELEVATED,
+              boxShadow: SHADOW_MD,
               backdropFilter: 'blur(24px)',
               padding: '4px',
               fontFamily: FONT,
@@ -705,7 +810,7 @@ function SelectionRow({
         padding: '4px 6px',
         height: ROW_HEIGHT,
         borderRadius: 8,
-        background: isDragging ? '#eff6ff' : rowHovered ? '#f4f5f6' : 'transparent',
+        background: isDragging ? C_ACCENT_BG : rowHovered ? C_HOVER : 'transparent',
         transition: isDragging ? 'none' : 'background 0.1s',
         transform: isDragging ? `translateY(${dragOffset}px)` : 'none',
         zIndex: isDragging ? 10 : 0,
@@ -730,17 +835,10 @@ function SelectionRow({
         justifyContent: 'center',
         width: 16,
         flexShrink: 0,
-        color: '#c4c7cc',
+        color: C_PLACEHOLDER,
         cursor: 'grab',
       }}>
-        <svg width="8" height="12" viewBox="0 0 8 12" fill="currentColor">
-          <circle cx="2" cy="2" r="1.2" />
-          <circle cx="6" cy="2" r="1.2" />
-          <circle cx="2" cy="6" r="1.2" />
-          <circle cx="6" cy="6" r="1.2" />
-          <circle cx="2" cy="10" r="1.2" />
-          <circle cx="6" cy="10" r="1.2" />
-        </svg>
+        <GripVertical size={12} strokeWidth={2} />
       </div>
 
       {/* Shape preview */}
@@ -769,12 +867,12 @@ function SelectionRow({
           flex: 1,
           minWidth: 0,
           borderRadius: 6,
-          background: editing ? '#fff' : 'transparent',
+          background: editing ? C_INPUT_BG_ACTIVE : 'transparent',
           padding: '3px 6px',
           fontSize: 11,
           fontWeight: 500,
-          color: '#374151',
-          border: editing ? '1px solid rgba(59,130,246,0.5)' : '1px solid transparent',
+          color: C_VALUE,
+          border: editing ? `1px solid ${C_INPUT_BORDER_FOCUS}` : '1px solid transparent',
           outline: 'none',
           fontFamily: FONT,
           cursor: editing ? 'text' : 'inherit',
@@ -803,7 +901,7 @@ function SelectionRow({
       />
       {!hideDeselect && (
         <motion.button
-          whileHover={{ background: '#fee2e2' }}
+          whileHover={{ background: 'rgba(239,68,68,0.1)' }}
           whileTap={{ scale: 0.9 }}
           style={{
             display: 'flex',
@@ -815,7 +913,7 @@ function SelectionRow({
             background: 'transparent',
             border: 'none',
             cursor: 'pointer',
-            color: '#9ca3af',
+            color: C_MUTED,
             fontSize: 13,
             lineHeight: 1,
             flexShrink: 0,
@@ -826,10 +924,7 @@ function SelectionRow({
           onClick={e => { e.stopPropagation(); onDeselect(); }}
           title="Remove from selection"
         >
-          <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M2 4h12M5.33 4V2.67a1.33 1.33 0 011.34-1.34h2.66a1.33 1.33 0 011.34 1.34V4M6.67 7.33v4M9.33 7.33v4" />
-            <path d="M3.33 4l.67 9.33a1.33 1.33 0 001.33 1.34h5.34a1.33 1.33 0 001.33-1.34L12.67 4" />
-          </svg>
+          <X size={12} strokeWidth={1.5} />
         </motion.button>
       )}
     </div>
@@ -848,21 +943,21 @@ function Group({ children, gap = 4 }: { children: React.ReactNode; gap?: number 
 
 function Label({ children }: { children: React.ReactNode }) {
   return (
-    <span style={{ fontSize: 10, fontWeight: 500, color: '#9ca3af', fontFamily: FONT, userSelect: 'none' }}>
+    <span style={{ fontSize: 10, fontWeight: 500, color: C_LABEL, fontFamily: FONT, userSelect: 'none' }}>
       {children}
     </span>
   );
 }
 
 function Divider() {
-  return <div style={{ width: 1, height: 22, background: '#e5e7eb', flexShrink: 0 }} />;
+  return <div style={{ width: 1, height: 22, background: C_DIVIDER, borderRadius: 1, flexShrink: 0 }} />;
 }
 
-function ActionButton({ children, onClick, title, color = '#6b7280' }: { children: React.ReactNode; onClick: () => void; title: string; color?: string }) {
+function ActionButton({ children, onClick, title, color = C_ICON }: { children: React.ReactNode; onClick: () => void; title: string; color?: string }) {
   return (
     <motion.button
       title={title}
-      whileHover={{ background: '#f3f4f6' }}
+      whileHover={{ background: C_HOVER }}
       whileTap={{ scale: 0.93 }}
       style={{
         borderRadius: 6,

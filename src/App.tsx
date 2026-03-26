@@ -1,12 +1,21 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { NudgeCanvas, DEFAULT_SETTINGS } from './canvas/canvas';
-import { InfoButton, SettingsButton } from './canvas/info-button';
+import { NudgeCanvas, DEFAULT_SETTINGS, type ToolMode } from './canvas/canvas';
+import { Toolbar } from './canvas/toolbar';
 import { DEMO_ITEMS, DEMO_RENDERERS } from './demo/demo-items';
-import type { NudgeSettings } from './canvas/types';
-
-const FONT = "'Geist', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif";
-const MONO = "'Geist', ui-monospace, monospace";
+import { FRAME_CATEGORIES } from './canvas/frame-presets';
+import { X } from 'lucide-react';
+import { ColorPickerPopover } from './canvas/color-picker';
+import type { NudgeSettings, ExportFormat } from './canvas/types';
+import {
+  FONT, C_ACCENT,
+  C_HEADING, C_VALUE, C_ICON, C_MUTED,
+  C_HOVER, C_INPUT_BG, C_INPUT_BG_ACTIVE, C_INPUT_BORDER_FOCUS,
+  C_DIVIDER, C_BORDER_SUBTLE, C_BORDER_CARD, C_CARD_BG,
+  C_ACCENT_BG, C_ACCENT_TEXT,
+  C_SURFACE_MODAL, C_SCROLLBAR, OVERLAY_BG,
+  SHADOW_LG,
+} from './canvas/tokens';
 
 // ---------------------------------------------------------------------------
 // Help sections
@@ -18,6 +27,9 @@ const HELP_SECTIONS = [
     items: [
       { keys: 'Drag item', desc: 'Move items around the canvas' },
       { keys: 'Drag empty space', desc: 'Draw a marquee to select multiple items' },
+      { keys: 'Space + Drag', desc: 'Pan the canvas' },
+      { keys: 'Scroll / Trackpad', desc: 'Pan the canvas' },
+      { keys: 'Pinch / \u2318 Scroll', desc: 'Zoom in and out' },
     ],
   },
   {
@@ -26,6 +38,7 @@ const HELP_SECTIONS = [
       { keys: 'Click', desc: 'Select a single item' },
       { keys: '\u21e7 Shift + Click', desc: 'Add or remove from selection' },
       { keys: '\u2318A', desc: 'Select all items' },
+      { keys: 'Escape', desc: 'Deselect all' },
       { keys: 'Click empty space', desc: 'Deselect all' },
     ],
   },
@@ -34,12 +47,36 @@ const HELP_SECTIONS = [
     items: [
       { keys: '\u2190 \u2192 \u2191 \u2193', desc: 'Nudge selected items' },
       { keys: '\u21e7 + Arrow', desc: 'Large nudge' },
-      { keys: 'Control Panel', desc: 'Adjust scale, rotation, and z-index' },
+      { keys: '\u21e7H', desc: 'Flip horizontal' },
+      { keys: '\u21e7V', desc: 'Flip vertical' },
+      { keys: '\u21e7 + Rotate', desc: 'Snap rotation to 15\u00b0 increments' },
+    ],
+  },
+  {
+    title: 'Layer Order',
+    items: [
+      { keys: '\u2318]', desc: 'Bring forward' },
+      { keys: '\u2318[', desc: 'Send backward' },
+      { keys: '\u2318\u2325]', desc: 'Bring to front' },
+      { keys: '\u2318\u2325[', desc: 'Send to back' },
+    ],
+  },
+  {
+    title: 'Alignment',
+    items: [
+      { keys: '\u2325A', desc: 'Align left' },
+      { keys: '\u2325D', desc: 'Align right' },
+      { keys: '\u2325H', desc: 'Align horizontal centers' },
+      { keys: '\u2325W', desc: 'Align top' },
+      { keys: '\u2325S', desc: 'Align bottom' },
+      { keys: '\u2325V', desc: 'Align vertical centers' },
     ],
   },
   {
     title: 'Actions',
     items: [
+      { keys: '\u2318G', desc: 'Group selected items' },
+      { keys: '\u2318\u21e7G', desc: 'Ungroup' },
       { keys: '\u2318D', desc: 'Duplicate selected items' },
       { keys: '\u2318C / \u2318V', desc: 'Copy and paste items' },
       { keys: '\u232b Delete', desc: 'Remove selected items' },
@@ -47,16 +84,50 @@ const HELP_SECTIONS = [
     ],
   },
   {
-    title: 'Tools',
+    title: 'Zoom',
     items: [
-      { keys: 'G', desc: 'Toggle snap-to-grid' },
-      { keys: 'Alignment guides', desc: 'Auto-shown when dragging near edges' },
-      { keys: 'Place button', desc: 'Copy position values to clipboard' },
+      { keys: '\u2318+ / \u2318\u2212', desc: 'Zoom in / out' },
+      { keys: '\u23180', desc: 'Fit all items in view' },
+      { keys: '\u23181', desc: 'Reset to 100%' },
     ],
   },
   {
-    title: 'Multi-select Panel',
+    title: 'Create',
     items: [
+      { keys: 'R', desc: 'Rectangle tool \u2014 click and drag' },
+      { keys: 'O', desc: 'Ellipse tool \u2014 click and drag' },
+      { keys: 'L', desc: 'Line tool \u2014 click and drag' },
+      { keys: 'P', desc: 'Pen tool \u2014 click to place points' },
+      { keys: 'T', desc: 'Text tool \u2014 click to place' },
+      { keys: '\u21e7 + Drag', desc: 'Constrain to square / circle / 45\u00b0' },
+      { keys: '\u2325 + Drag handle', desc: 'Break handle symmetry (corner point)' },
+      { keys: 'Escape / Enter', desc: 'Finish pen path (open)' },
+      { keys: 'Click first point', desc: 'Close pen path (filled)' },
+    ],
+  },
+  {
+    title: 'Tools',
+    items: [
+      { keys: 'G', desc: 'Toggle snap-to-grid' },
+      { keys: 'W', desc: 'Toggle window mode (artboard + edge snap)' },
+      { keys: 'Tab / \u21e7 Tab', desc: 'Cycle selection forward / backward' },
+      { keys: '\u2325 Alt + Hover', desc: 'Measure distance between items' },
+      { keys: 'Middle-click drag', desc: 'Pan the canvas from anywhere' },
+    ],
+  },
+  {
+    title: 'Input Fields',
+    items: [
+      { keys: '+10, \u221210, *2, /2', desc: 'Math expressions in any numeric input' },
+      { keys: 'Drag label', desc: 'Scrub to adjust values' },
+      { keys: '\u21e7 + Drag', desc: 'Scrub in larger increments' },
+      { keys: '\u2191 \u2193 in field', desc: 'Step value up or down' },
+    ],
+  },
+  {
+    title: 'Multi-select',
+    items: [
+      { keys: 'Alignment bar', desc: 'Appears below multi-selection bounding box' },
       { keys: 'Hover badge', desc: 'View and manage selected items' },
       { keys: 'Drag rows', desc: 'Reorder z-index by dragging' },
       { keys: 'Double-click label', desc: 'Rename any item inline' },
@@ -122,7 +193,7 @@ function useCustomScrollbar() {
             width: 4,
             height: thumbState.height,
             borderRadius: 2,
-            background: 'rgba(0,0,0,0.15)',
+            background: C_SCROLLBAR,
             transformOrigin: 'right center',
             pointerEvents: 'none',
             zIndex: 10,
@@ -165,7 +236,7 @@ function PanelShell({ title, subtitle, onClose, children }: {
         <div style={{
           position: 'absolute',
           inset: 0,
-          background: 'rgba(0,0,0,0.2)',
+          background: OVERLAY_BG,
           backdropFilter: 'blur(8px)',
           WebkitBackdropFilter: 'blur(8px)',
         }} />
@@ -179,10 +250,9 @@ function PanelShell({ title, subtitle, onClose, children }: {
             position: 'relative',
             width: 420,
             maxHeight: 'min(560px, 80vh)',
-            borderRadius: 20,
-            background: 'rgba(255,255,255,0.98)',
-            boxShadow: '0 24px 80px rgba(0,0,0,0.12), 0 0 0 1px rgba(0,0,0,0.05)',
-            backdropFilter: 'blur(40px)',
+            borderRadius: 12,
+            background: C_SURFACE_MODAL,
+            boxShadow: SHADOW_LG,
             display: 'flex',
             flexDirection: 'column',
             overflow: 'hidden',
@@ -190,35 +260,33 @@ function PanelShell({ title, subtitle, onClose, children }: {
           }}
         >
           <div style={{
-            padding: '20px 24px 16px',
+            padding: '16px 20px 12px',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between',
-            borderBottom: '1px solid rgba(0,0,0,0.05)',
+            borderBottom: `1px solid ${C_BORDER_SUBTLE}`,
             flexShrink: 0,
           }}>
             <div>
-              <div style={{ fontSize: 15, fontWeight: 600, color: '#111827', letterSpacing: '-0.01em' }}>
+              <div style={{ fontSize: 14, fontWeight: 600, color: C_HEADING, letterSpacing: '-0.01em' }}>
                 {title}
               </div>
-              <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 2 }}>
+              <div style={{ fontSize: 11, color: C_MUTED, marginTop: 2 }}>
                 {subtitle}
               </div>
             </div>
             <motion.button
-              whileHover={{ background: '#f3f4f6' }}
+              whileHover={{ background: C_HOVER }}
               whileTap={{ scale: 0.9 }}
               onClick={onClose}
               style={{
-                width: 28, height: 28, borderRadius: 8,
+                width: 28, height: 28, borderRadius: 6,
                 border: 'none', background: 'transparent', cursor: 'pointer',
                 display: 'flex', alignItems: 'center', justifyContent: 'center',
-                color: '#9ca3af', flexShrink: 0,
+                color: C_MUTED, flexShrink: 0,
               }}
             >
-              <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
-                <path d="M2 2l10 10M12 2L2 12" />
-              </svg>
+              <X size={14} strokeWidth={1.5} />
             </motion.button>
           </div>
           <div
@@ -241,8 +309,7 @@ function PanelShell({ title, subtitle, onClose, children }: {
 function SectionLabel({ children }: { children: React.ReactNode }) {
   return (
     <div style={{
-      fontSize: 10, fontWeight: 600, color: '#9ca3af',
-      textTransform: 'uppercase', letterSpacing: '0.05em',
+      fontSize: 11, fontWeight: 500, color: C_MUTED,
       padding: '0 8px 6px',
     }}>
       {children}
@@ -253,8 +320,8 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
 function SectionCard({ children }: { children: React.ReactNode }) {
   return (
     <div style={{
-      borderRadius: 12, background: '#f9fafb',
-      border: '1px solid rgba(0,0,0,0.04)', overflow: 'hidden',
+      borderRadius: 8, background: C_CARD_BG,
+      border: `1px solid ${C_BORDER_CARD}`, overflow: 'hidden',
     }}>
       {children}
     </div>
@@ -276,16 +343,15 @@ function InfoPanel({ onClose }: { onClose: () => void }) {
               <div key={ii} style={{
                 display: 'flex', alignItems: 'center', justifyContent: 'space-between',
                 gap: 12, padding: '8px 12px',
-                borderTop: ii > 0 ? '1px solid rgba(0,0,0,0.04)' : 'none',
+                borderTop: ii > 0 ? `1px solid ${C_BORDER_CARD}` : 'none',
               }}>
-                <span style={{ fontSize: 12, color: '#374151', fontWeight: 500 }}>
+                <span style={{ fontSize: 12, color: C_VALUE, fontWeight: 400 }}>
                   {item.desc}
                 </span>
                 <span style={{
-                  fontSize: 11, color: '#6b7280', fontFamily: MONO, fontWeight: 500,
-                  whiteSpace: 'nowrap', background: '#fff', padding: '2px 8px',
-                  borderRadius: 6, border: '1px solid rgba(0,0,0,0.06)',
-                  boxShadow: '0 1px 2px rgba(0,0,0,0.04)', flexShrink: 0,
+                  fontSize: 11, color: C_ICON, fontFamily: FONT, fontWeight: 500,
+                  whiteSpace: 'nowrap', background: C_INPUT_BG, padding: '2px 7px',
+                  borderRadius: 5, flexShrink: 0,
                 }}>
                   {item.keys}
                 </span>
@@ -306,11 +372,11 @@ function SettingRow({ label, desc, children }: { label: string; desc?: string; c
   return (
     <div style={{
       display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-      padding: '10px 12px', gap: 12,
+      padding: '8px 10px', gap: 12,
     }}>
       <div style={{ minWidth: 0 }}>
-        <div style={{ fontSize: 12, color: '#374151', fontWeight: 500 }}>{label}</div>
-        {desc && <div style={{ fontSize: 10, color: '#9ca3af', marginTop: 1 }}>{desc}</div>}
+        <div style={{ fontSize: 12, color: C_VALUE, fontWeight: 400 }}>{label}</div>
+        {desc && <div style={{ fontSize: 10, color: C_MUTED, marginTop: 1, fontWeight: 400 }}>{desc}</div>}
       </div>
       <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: 6 }}>
         {children}
@@ -338,11 +404,11 @@ function NumericSetting({ value, onChange, suffix = 'px', min = 1, max = 200, wi
   return (
     <input
       style={{
-        width, padding: '4px 0', borderRadius: 6,
-        border: editing ? '1px solid rgba(59,130,246,0.5)' : '1px solid rgba(0,0,0,0.08)',
-        background: '#fff', fontSize: 11, fontWeight: 500, fontFamily: MONO,
-        color: '#374151', textAlign: 'center', outline: 'none',
-        transition: 'border-color 0.15s',
+        width, padding: '4px 0', borderRadius: 5,
+        border: editing ? `1px solid ${C_INPUT_BORDER_FOCUS}` : '1px solid transparent',
+        background: editing ? C_INPUT_BG_ACTIVE : C_INPUT_BG, fontSize: 11, fontWeight: 500, fontFamily: FONT,
+        color: C_VALUE, textAlign: 'center', outline: 'none',
+        transition: 'border-color 0.15s, background 0.15s',
       }}
       value={editing ? draft : `${value}${suffix}`}
       onFocus={(e) => { setEditing(true); setDraft(String(value)); requestAnimationFrame(() => e.target.select()); }}
@@ -365,10 +431,10 @@ function PresetButtons({ value, presets, onChange }: { value: number; presets: n
           key={p}
           onClick={() => onChange(p)}
           style={{
-            padding: '4px 8px', borderRadius: 6, border: 'none',
-            background: value === p ? '#eff6ff' : '#f4f5f6',
-            color: value === p ? '#2563eb' : '#6b7280',
-            fontSize: 10, fontWeight: 600, fontFamily: MONO,
+            padding: '4px 7px', borderRadius: 5, border: 'none',
+            background: value === p ? C_ACCENT_BG : C_INPUT_BG,
+            color: value === p ? C_ACCENT_TEXT : C_ICON,
+            fontSize: 10, fontWeight: 500, fontFamily: FONT,
             cursor: 'pointer', transition: 'background 0.15s, color 0.15s',
           }}
         >
@@ -380,66 +446,265 @@ function PresetButtons({ value, presets, onChange }: { value: number; presets: n
 }
 
 function ColorSetting({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const [pickerOpen, setPickerOpen] = useState(false);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(value);
+  const swatchRef = useRef<HTMLDivElement>(null);
+  const [anchor, setAnchor] = useState({ top: 0, left: 0 });
 
   const commit = useCallback(() => {
     setEditing(false);
-    if (/^#([0-9a-fA-F]{3}){1,2}$/.test(draft)) {
-      onChange(draft);
+    let v = draft.trim();
+    if (!v.startsWith('#')) v = '#' + v;
+    if (/^#([0-9a-fA-F]{3}){1,2}$/.test(v)) {
+      if (v.length === 4) v = `#${v[1]}${v[1]}${v[2]}${v[2]}${v[3]}${v[3]}`;
+      onChange(v);
     } else {
       setDraft(value);
     }
   }, [draft, value, onChange]);
 
+  const openPicker = useCallback(() => {
+    if (swatchRef.current) {
+      const r = swatchRef.current.getBoundingClientRect();
+      setAnchor({ top: r.bottom + 6, left: r.left });
+    }
+    setPickerOpen(true);
+  }, []);
+
   const presets = ['#f8fafc', '#ffffff', '#f1f5f9', '#fafaf9', '#0f172a', '#18181b'];
 
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-      <div style={{ position: 'relative', width: 22, height: 22, borderRadius: 6, overflow: 'hidden', border: '1px solid rgba(0,0,0,0.1)', flexShrink: 0 }}>
-        <input
-          type="color"
-          value={value}
-          onChange={(e) => { onChange(e.target.value); setDraft(e.target.value); }}
-          style={{ position: 'absolute', inset: -4, width: 30, height: 30, cursor: 'pointer', border: 'none', padding: 0 }}
+    <>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+        <div
+          ref={swatchRef}
+          onClick={openPicker}
+          style={{
+            width: 22, height: 22, borderRadius: 5, flexShrink: 0,
+            background: value, border: '1px solid rgba(0,0,0,0.08)',
+            cursor: 'pointer',
+          }}
         />
+        <input
+          style={{
+            width: 64, padding: '4px 0', borderRadius: 5,
+            border: editing ? `1px solid ${C_INPUT_BORDER_FOCUS}` : '1px solid transparent',
+            background: editing ? C_INPUT_BG_ACTIVE : C_INPUT_BG, fontSize: 11, fontWeight: 500, fontFamily: FONT,
+            color: C_VALUE, textAlign: 'center', outline: 'none',
+            transition: 'border-color 0.15s, background 0.15s',
+          }}
+          value={editing ? draft : value}
+          onFocus={(e) => { setEditing(true); setDraft(value); requestAnimationFrame(() => e.target.select()); }}
+          onChange={(e) => setDraft(e.target.value)}
+          onBlur={commit}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
+            if (e.key === 'Escape') { setEditing(false); setDraft(value); (e.target as HTMLInputElement).blur(); }
+          }}
+          spellCheck={false}
+        />
+        <div style={{ display: 'flex', gap: 2 }}>
+          {presets.map(c => (
+            <button
+              key={c}
+              onClick={() => { onChange(c); setDraft(c); }}
+              style={{
+                width: 16, height: 16, borderRadius: 4, border: value === c ? `1.5px solid ${C_ACCENT}` : '1px solid rgba(0,0,0,0.08)',
+                background: c, cursor: 'pointer', padding: 0, transition: 'border-color 0.15s',
+              }}
+            />
+          ))}
+        </div>
       </div>
-      <input
-        style={{
-          width: 64, padding: '4px 0', borderRadius: 6,
-          border: editing ? '1px solid rgba(59,130,246,0.5)' : '1px solid rgba(0,0,0,0.08)',
-          background: '#fff', fontSize: 11, fontWeight: 500, fontFamily: MONO,
-          color: '#374151', textAlign: 'center', outline: 'none',
-          transition: 'border-color 0.15s',
-        }}
-        value={editing ? draft : value}
-        onFocus={(e) => { setEditing(true); setDraft(value); requestAnimationFrame(() => e.target.select()); }}
-        onChange={(e) => setDraft(e.target.value)}
-        onBlur={commit}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
-          if (e.key === 'Escape') { setEditing(false); setDraft(value); (e.target as HTMLInputElement).blur(); }
-        }}
-        spellCheck={false}
-      />
-      <div style={{ display: 'flex', gap: 2 }}>
-        {presets.map(c => (
-          <button
-            key={c}
-            onClick={() => { onChange(c); setDraft(c); }}
-            style={{
-              width: 16, height: 16, borderRadius: 4, border: value === c ? '1.5px solid #3b82f6' : '1px solid rgba(0,0,0,0.1)',
-              background: c, cursor: 'pointer', padding: 0, transition: 'border-color 0.15s',
-            }}
-          />
-        ))}
-      </div>
+      <AnimatePresence>
+        {pickerOpen && (
+          <>
+            <div style={{ position: 'fixed', inset: 0, zIndex: 1100 }} onClick={() => setPickerOpen(false)} />
+            <ColorPickerPopover color={value} onChange={v => { onChange(v); setDraft(v); }} anchor={anchor} />
+          </>
+        )}
+      </AnimatePresence>
+    </>
+  );
+}
+
+const FORMAT_OPTIONS: { value: ExportFormat; label: string }[] = [
+  { value: 'raw', label: 'Raw' },
+  { value: 'react-style', label: 'React' },
+  { value: 'css', label: 'CSS' },
+];
+
+function FormatButtons({ value, onChange }: { value: ExportFormat; onChange: (v: ExportFormat) => void }) {
+  return (
+    <div style={{ display: 'flex', gap: 2 }}>
+      {FORMAT_OPTIONS.map(opt => (
+        <button
+          key={opt.value}
+          onClick={() => onChange(opt.value)}
+          style={{
+            padding: '4px 7px', borderRadius: 5, border: 'none',
+            background: value === opt.value ? C_ACCENT_BG : C_INPUT_BG,
+            color: value === opt.value ? C_ACCENT_TEXT : C_ICON,
+            fontSize: 10, fontWeight: 500, fontFamily: FONT,
+            cursor: 'pointer', transition: 'background 0.15s, color 0.15s',
+          }}
+        >
+          {opt.label}
+        </button>
+      ))}
     </div>
   );
 }
 
 function Separator() {
-  return <div style={{ height: 1, background: 'rgba(0,0,0,0.04)' }} />;
+  return <div style={{ height: 1, background: C_BORDER_CARD }} />;
+}
+
+function Toggle({ value, onChange }: { value: boolean; onChange: (v: boolean) => void }) {
+  return (
+    <button
+      onClick={() => onChange(!value)}
+      style={{
+        width: 36, height: 20, borderRadius: 10, border: 'none',
+        background: value ? C_ACCENT : C_DIVIDER,
+        cursor: 'pointer', position: 'relative',
+        transition: 'background 0.2s', flexShrink: 0,
+        padding: 0,
+      }}
+    >
+      <div style={{
+        position: 'absolute',
+        top: 2, left: value ? 18 : 2,
+        width: 16, height: 16, borderRadius: 8,
+        background: 'white',
+        boxShadow: '0 1px 2px rgba(0,0,0,0.15)',
+        transition: 'left 0.2s',
+      }} />
+    </button>
+  );
+}
+
+// ── Frame presets ──────────────────────────────────────────────────────────
+
+function FramePresetPicker({
+  currentW,
+  currentH,
+  onSelect,
+}: {
+  currentW: number;
+  currentH: number;
+  onSelect: (w: number, h: number) => void;
+}) {
+  const [expanded, setExpanded] = useState<Set<string>>(new Set(['Desktop', 'Phone']));
+
+  const toggle = (name: string) => {
+    setExpanded(prev => {
+      const next = new Set(prev);
+      if (next.has(name)) next.delete(name);
+      else next.add(name);
+      return next;
+    });
+  };
+
+  return (
+    <div>
+      {FRAME_CATEGORIES.map((cat, ci) => {
+        const isOpen = expanded.has(cat.name);
+        const hasActive = cat.items.some(p => p.w === currentW && p.h === currentH);
+        return (
+          <div key={cat.name}>
+            {ci > 0 && <div style={{ height: 1, background: C_BORDER_CARD, margin: '0 12px' }} />}
+            {/* Category header */}
+            <button
+              onClick={() => toggle(cat.name)}
+              style={{
+                width: '100%',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 6,
+                padding: '8px 12px',
+                background: 'none',
+                border: 'none',
+                cursor: 'pointer',
+                textAlign: 'left',
+              }}
+            >
+              <span style={{
+                fontSize: 10,
+                color: isOpen ? C_VALUE : C_ICON,
+                transition: 'transform 0.15s',
+                display: 'inline-block',
+                transform: isOpen ? 'rotate(0deg)' : 'rotate(-90deg)',
+                lineHeight: 1,
+              }}>▾</span>
+              <span style={{
+                fontSize: 12,
+                fontWeight: 600,
+                color: hasActive && !isOpen ? C_ACCENT_TEXT : C_VALUE,
+                fontFamily: FONT,
+                flex: 1,
+              }}>
+                {cat.name}
+              </span>
+              {hasActive && !isOpen && (
+                <span style={{
+                  fontSize: 10,
+                  color: C_MUTED,
+                  fontFamily: FONT,
+                }}>
+                  {currentW}×{currentH}
+                </span>
+              )}
+            </button>
+
+            {/* Preset rows */}
+            {isOpen && cat.items.map((p, pi) => {
+              const active = p.w === currentW && p.h === currentH;
+              return (
+                <button
+                  key={pi}
+                  onClick={() => onSelect(p.w, p.h)}
+                  style={{
+                    width: '100%',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    padding: '7px 12px 7px 28px',
+                    background: active ? C_ACCENT_BG : 'none',
+                    border: 'none',
+                    cursor: 'pointer',
+                    textAlign: 'left',
+                    transition: 'background 0.1s',
+                  }}
+                  onMouseEnter={e => { if (!active) (e.currentTarget as HTMLElement).style.background = C_CARD_BG; }}
+                  onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = active ? C_ACCENT_BG : 'none'; }}
+                >
+                  <span style={{
+                    fontSize: 12,
+                    color: active ? C_ACCENT_TEXT : C_VALUE,
+                    fontFamily: FONT,
+                    fontWeight: active ? 500 : 400,
+                  }}>
+                    {p.label}
+                  </span>
+                  <span style={{
+                    fontSize: 11,
+                    color: active ? C_ACCENT : C_MUTED,
+                    fontFamily: FONT,
+                    fontWeight: active ? 600 : 400,
+                    whiteSpace: 'nowrap',
+                  }}>
+                    {p.w}×{p.h}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        );
+      })}
+    </div>
+  );
 }
 
 function SettingsPanel({ settings, onChange, onClose }: {
@@ -501,6 +766,61 @@ function SettingsPanel({ settings, onChange, onClose }: {
           </SettingRow>
         </SectionCard>
       </div>
+
+      {/* Window Mode */}
+      <div style={{ marginTop: 16 }}>
+        <SectionLabel>Window Mode</SectionLabel>
+        <SectionCard>
+          <SettingRow label="Enabled" desc="Show artboard with edge snapping (W)">
+            <Toggle value={settings.windowMode ?? false} onChange={v => onChange({ windowMode: v })} />
+          </SettingRow>
+          {settings.windowMode && (
+            <>
+              <Separator />
+              {/* W × H row */}
+              <div style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                padding: '10px 12px',
+                gap: 8,
+              }}>
+                <span style={{ fontSize: 12, color: C_VALUE, fontWeight: 500 }}>Size</span>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                  <NumericSetting
+                    value={settings.windowW ?? 390}
+                    onChange={v => onChange({ windowW: v })}
+                    min={100} max={4000} width={56} suffix="W"
+                  />
+                  <span style={{ fontSize: 11, color: C_MUTED }}>×</span>
+                  <NumericSetting
+                    value={settings.windowH ?? 844}
+                    onChange={v => onChange({ windowH: v })}
+                    min={100} max={4000} width={56} suffix="H"
+                  />
+                </div>
+              </div>
+              <Separator />
+              {/* Frame presets */}
+              <FramePresetPicker
+                currentW={settings.windowW ?? 390}
+                currentH={settings.windowH ?? 844}
+                onSelect={(w, h) => onChange({ windowW: w, windowH: h })}
+              />
+            </>
+          )}
+        </SectionCard>
+      </div>
+
+      {/* Export */}
+      <div style={{ marginTop: 16 }}>
+        <SectionLabel>Export</SectionLabel>
+        <SectionCard>
+          <SettingRow label="Place format" desc="Output format when placing items">
+            <FormatButtons value={settings.exportFormat} onChange={v => onChange({ exportFormat: v })} />
+          </SettingRow>
+        </SectionCard>
+      </div>
     </PanelShell>
   );
 }
@@ -512,13 +832,18 @@ function SettingsPanel({ settings, onChange, onClose }: {
 export default function App() {
   const [showInfo, setShowInfo] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
-  const [hasSelection, setHasSelection] = useState(false);
+  const [toolMode, setToolMode] = useState<ToolMode>('select');
   const [settings, setSettings] = useState<NudgeSettings>({ ...DEFAULT_SETTINGS });
-
   const toggleInfo = useCallback(() => { setShowInfo(v => !v); setShowSettings(false); }, []);
   const toggleSettings = useCallback(() => { setShowSettings(v => !v); setShowInfo(false); }, []);
   const patchSettings = useCallback((patch: Partial<NudgeSettings>) => {
     setSettings(prev => ({ ...prev, ...patch }));
+  }, []);
+  const handleSettingsLoaded = useCallback((loaded: Partial<NudgeSettings>) => {
+    setSettings(prev => ({ ...prev, ...loaded }));
+  }, []);
+  const toggleWindowMode = useCallback(() => {
+    setSettings(prev => ({ ...prev, windowMode: !prev.windowMode }));
   }, []);
 
   return (
@@ -534,34 +859,24 @@ export default function App() {
         initialItems={DEMO_ITEMS}
         renderers={DEMO_RENDERERS}
         settings={settings}
+        toolMode={toolMode}
+        onToolModeChange={setToolMode}
         onInfoClick={toggleInfo}
         onSettingsClick={toggleSettings}
-        onSelectionChange={setHasSelection}
+        onSettingsLoaded={handleSettingsLoaded}
+        onToggleWindowMode={toggleWindowMode}
+        onWindowSettingsChange={patchSettings}
       />
 
-      {/* Standalone buttons (only when no toolbar) */}
-      <AnimatePresence>
-        {!hasSelection && (
-          <motion.div
-            key="standalone-buttons"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: 0.15 }}
-            style={{
-              position: 'absolute',
-              bottom: 20, left: '50%',
-              transform: 'translateX(-50%)',
-              display: 'flex',
-              alignItems: 'center',
-              gap: 4,
-            }}
-          >
-            <SettingsButton onClick={toggleSettings} />
-            <InfoButton onClick={toggleInfo} />
-          </motion.div>
-        )}
-      </AnimatePresence>
+      {/* Toolbar */}
+      <Toolbar
+        toolMode={toolMode}
+        onToolModeChange={setToolMode}
+        windowMode={settings.windowMode ?? false}
+        onToggleWindowMode={toggleWindowMode}
+        onSettingsClick={toggleSettings}
+        onInfoClick={toggleInfo}
+      />
 
       {/* Panels */}
       <AnimatePresence>
